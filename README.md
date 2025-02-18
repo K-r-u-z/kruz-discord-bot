@@ -1,6 +1,7 @@
 # Kruz's Community Bot
 
 A Discord bot for managing the Kruz's Community server.
+Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ## Setup
 
