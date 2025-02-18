@@ -23,7 +23,7 @@ A Discord bot for managing the Kruz's Community server.
 ## Features
 
 ### Automated Meme Posting
-- Fetches and posts memes from Reddit (r/wholesomememes, r/memes, r/dankmemes)
+- Fetches and posts memes from Reddit (r/memes)
 - Content filtering for NSFW and inappropriate content
 - Configurable posting interval
 - Tracks posted memes to avoid duplicates
