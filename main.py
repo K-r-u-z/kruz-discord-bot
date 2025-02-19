@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import asyncio
-import signal
+import signal # Might use this later
 from config import TOKEN, GUILD_ID
 
 # Constants

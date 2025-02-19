@@ -52,7 +52,7 @@ class MemesCog(commands.Cog):
                         client_secret=REDDIT_CLIENT_SECRET,
                         user_agent=REDDIT_USER_AGENT
                     ) as reddit:
-                        safe_subreddits = ['memes']
+                        safe_subreddits = ['meme']
                         subreddit = await reddit.subreddit(random.choice(safe_subreddits))
                         memes = []
                         

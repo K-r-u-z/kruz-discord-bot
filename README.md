@@ -24,7 +24,7 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 ## Features
 
 ### Automated Meme Posting
-- Fetches and posts memes from Reddit (r/memes)
+- Fetches and posts memes from Reddit (r/meme)
 - Content filtering for NSFW and inappropriate content
 - Configurable posting interval
 - Tracks posted memes to avoid duplicates
