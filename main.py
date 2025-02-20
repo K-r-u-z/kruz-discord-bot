@@ -6,7 +6,6 @@ from config import TOKEN, GUILD_ID, BOT_SETTINGS
 from datetime import datetime
 import asyncpraw
 from discord.ext import tasks
-import logging
 
 
 # Constants
@@ -94,7 +93,7 @@ async def health_check():
     try:
         # Check Discord connection
         if not bot.is_ready():
-            logger.warning("Bot not ready - attempting reconnect")
+            print("Bot not ready - attempting reconnect")
             await bot.close()
             await bot.start(TOKEN)
             
@@ -103,7 +102,7 @@ async def health_check():
             await reddit.user.me()
             
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        print(f"Health check failed: {e}")
 
 if __name__ == "__main__":
     try:

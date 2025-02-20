@@ -1,18 +1,6 @@
 import os
 import json
-import logging
 from dotenv import load_dotenv
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -58,17 +46,17 @@ def load_bot_settings():
         settings = _load_settings_file()
         missing = required_fields - set(settings.keys())
         if missing:
-            logger.warning(f"Missing required settings: {missing}, using defaults")
+            print(f"Missing required settings: {missing}, using defaults")
             return _get_default_settings()
             
         # Validate status configuration
         if not all(k in settings['status'] for k in ['type', 'name', 'status']):
-            logger.warning("Invalid status configuration, using defaults")
+            print("Invalid status configuration, using defaults")
             return _get_default_settings()
             
         return settings
     except Exception as e:
-        logger.error(f"Settings load error: {e}")
+        print(f"Settings load error: {e}")
         return _get_default_settings()
 
 BOT_SETTINGS = load_bot_settings()
