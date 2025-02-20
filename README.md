@@ -89,7 +89,12 @@ All administrative commands require administrator permissions.
 ## Technical Features
 
 ### Error Handling & Logging
+<<<<<<< HEAD
 - Basic error handling and console output
+=======
+- Comprehensive error logging to `bot.log`
+- Structured logging format with timestamps
+>>>>>>> 5ad55322d47c75f50fc5076925dfba76b607f3ab
 - Graceful shutdown handling
 - Connection recovery system
 - Command error feedback
