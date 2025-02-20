@@ -375,5 +375,15 @@ class MemesCog(commands.Cog):
                 and not any(word in title_lower for word in self.blocked_words)
                 and not meme.spoiler)
 
+    async def _should_post(self) -> bool:
+        """Check if enough time has passed to post a new meme"""
+        current_time = time.time()
+        if current_time - self.last_post_time < self.meme_interval * 60:  # Convert minutes to seconds
+            return False
+            
+        self.last_post_time = current_time
+        self.save_settings()  # Save the new last_post_time
+        return True
+
 async def setup(bot):
     await bot.add_cog(MemesCog(bot)) 

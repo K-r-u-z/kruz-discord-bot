@@ -1,11 +1,8 @@
 import discord
 from discord.ext import commands
 import asyncio
-import signal # Might use this later
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
 from datetime import datetime
-import asyncpraw
-
 
 # Constants
 GUILD_ID = discord.Object(id=GUILD_ID)
