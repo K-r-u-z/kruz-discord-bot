@@ -88,15 +88,9 @@ All administrative commands require administrator permissions.
 
 ## Technical Features
 
-### Error Handling & Logging
-<<<<<<< HEAD
-- Basic error handling and console output
-=======
-- Comprehensive error logging to `bot.log`
-- Structured logging format with timestamps
->>>>>>> 5ad55322d47c75f50fc5076925dfba76b607f3ab
-- Graceful shutdown handling
-- Connection recovery system
+### Error Handling
+- Graceful error recovery
+- User-friendly error messages
 - Command error feedback
 
 ### Performance Optimizations
@@ -105,6 +99,16 @@ All administrative commands require administrator permissions.
 - Memory-efficient data storage
 - Periodic cleanup of stored data
 - Command cooldowns
+
+### Reliability Features
+- Automated health monitoring:
+  - Discord connection checks
+  - Auto-reconnection on failure
+  - 5-minute check intervals
+- Graceful shutdown handling:
+  - Task cleanup
+  - Connection closure
+  - Resource cleanup
 
 ### Security Features
 - Environment variable configuration
@@ -123,11 +127,4 @@ Settings are stored in JSON files with automatic validation:
   - Blocked words list
   - Posted meme IDs
   - Posting interval
-  - Last post timestamp
-
-### Health Monitoring
-- Periodic health checks
-- Discord connection monitoring
-- Reddit API status verification
-- Automatic reconnection
-- Error reporting system 
+  - Last post timestamp 

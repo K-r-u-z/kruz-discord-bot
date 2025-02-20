@@ -46,17 +46,14 @@ def load_bot_settings():
         settings = _load_settings_file()
         missing = required_fields - set(settings.keys())
         if missing:
-            print(f"Missing required settings: {missing}, using defaults")
             return _get_default_settings()
             
         # Validate status configuration
         if not all(k in settings['status'] for k in ['type', 'name', 'status']):
-            print("Invalid status configuration, using defaults")
             return _get_default_settings()
             
         return settings
-    except Exception as e:
-        print(f"Settings load error: {e}")
+    except Exception:
         return _get_default_settings()
 
 BOT_SETTINGS = load_bot_settings()

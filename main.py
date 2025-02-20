@@ -1,15 +1,10 @@
 import discord
 from discord.ext import commands
 import asyncio
-import signal # Might use this later
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
-from datetime import datetime
-import asyncpraw
-from discord.ext import tasks
-
 
 # Constants
-GUILD_ID = discord.Object(id=GUILD_ID)
+GUILD = discord.Object(id=GUILD_ID)
 
 # Client Setup
 class Client(commands.Bot):
@@ -24,7 +19,31 @@ class Client(commands.Bot):
             'cogs.memes',
             'cogs.settings'
         ]
+        self._health_check_task = None
     
+    async def start_health_check(self):
+        """Start the health check loop"""
+        if self._health_check_task is None:
+            self._health_check_task = asyncio.create_task(self._health_check_loop())
+    
+    async def stop_health_check(self):
+        """Stop the health check loop"""
+        if self._health_check_task is not None:
+            self._health_check_task.cancel()
+            self._health_check_task = None
+    
+    async def _health_check_loop(self):
+        """Health check loop implementation"""
+        while True:
+            try:
+                # Check Discord connection
+                if not self.is_ready():
+                    await self.close()
+                    await self.start(TOKEN)
+            except Exception:
+                pass
+            await asyncio.sleep(300)  # 5 minutes
+
     async def setup_hook(self):
         for extension in self.initial_extensions:
             try:
@@ -32,11 +51,9 @@ class Client(commands.Bot):
                 print(f"Loaded extension {extension}")
             except Exception as e:
                 print(f"Failed to load extension {extension}: {e}")
-                # Add error reporting to a log file
-                self._log_error(f"Extension load error: {extension}", e)
 
         try:
-            synced = await self.tree.sync(guild=GUILD_ID)
+            synced = await self.tree.sync(guild=GUILD)
             print(f"Synced {len(synced)} commands")
         except Exception as e:
             print(f"Error syncing commands: {e}")
@@ -57,9 +74,8 @@ class Client(commands.Bot):
             )
         )
         
-    def _log_error(self, context, error):
-        with open('error.log', 'a') as f:
-            f.write(f"{datetime.now()}: {context} - {str(error)}\n")
+        # Start health check after bot is ready
+        await self.start_health_check()
 
 async def main():
     bot = Client()
@@ -72,11 +88,11 @@ async def main():
     finally:
         if not bot.is_closed():
             await shutdown(bot)
-            print("Bot has been shut down.")
 
 async def shutdown(bot):
     """Cleanup tasks before shutdown"""
-    print("Shutting down...")
+    # Stop health check
+    await bot.stop_health_check()
     
     # Cancel all tasks
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
@@ -86,23 +102,6 @@ async def shutdown(bot):
     
     # Close bot connection
     await bot.close()
-
-@tasks.loop(minutes=5)
-async def health_check():
-    """Monitor bot health"""
-    try:
-        # Check Discord connection
-        if not bot.is_ready():
-            print("Bot not ready - attempting reconnect")
-            await bot.close()
-            await bot.start(TOKEN)
-            
-        # Check Reddit API
-        async with asyncpraw.Reddit(...) as reddit:
-            await reddit.user.me()
-            
-    except Exception as e:
-        print(f"Health check failed: {e}")
 
 if __name__ == "__main__":
     try:
