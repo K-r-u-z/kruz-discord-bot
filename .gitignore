@@ -27,4 +27,11 @@ var/
 .idea/
 .vscode/
 *.swp
-*.swo 
+*.swo
+
+# Persistent data files
+meme_settings.json
+bot_settings.json
+
+# Persistent data file
+posted_memes.json 

@@ -9,8 +9,15 @@ class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="warn", description="Warn a user for breaking rules")
+    @app_commands.command(
+        name="kruzwarn",
+        description="Warn a user"
+    )
     @app_commands.guilds(GUILD)
+    @app_commands.describe(
+        user="The user to warn",
+        reason="The reason for the warning"
+    )
     @app_commands.checks.has_permissions(kick_members=True)
     async def warn_user(self, interaction: discord.Interaction, user: discord.Member, rule: str, reason: str = None):
         warn_embed = discord.Embed(
