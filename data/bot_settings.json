@@ -1,0 +1,9 @@
+{
+    "server_name": "Kruz's Community",
+    "status": {
+        "type": "watching",
+        "name": "over {server_name}",
+        "status": "online"
+    },
+    "embed_color": "0xbc69f0"
+}

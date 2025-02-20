@@ -7,24 +7,21 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### 🤖 Core Features
 - **Server Management**: Customizable server name, bot status, and embed colors
+- **Embed Management**: Comprehensive system for creating and managing embeds
 - **Automated Meme Posting**: Smart content filtering with extensive blocklist
-- **Moderation Tools**: Warning system with DM notifications
-- **Game Information**: Comprehensive game guides and information commands in the form of embeds.
+- **Moderation Tools**: Warning system with DM notifications (More features coming soon)
 
-### 🎮 Game Commands
-- `/lotterymessage` - Dank Memer lottery information
-- `/gameeventmessage` - Game event details
-- `/minigamemessage` - Mini-games guide
-- `/fishinggamemessage` - Fishing game guide
-- `/fightinggamemessage` - Fighting system guide
-- `/farminggamemessage` - Farming game guide
-- `/huntinggamemessage` - Hunting game guide
-- `/robbinggamemessage` - Robbing mechanics guide
+### 📝 Embed Management Commands
+- `/kruzembeds list` - Show all embed categories and their contents
+- `/kruzembeds create` - Create a new embed
+- `/kruzembeds edit` - Edit existing embeds
+- `/kruzembeds post` - Post single embed or all embeds from a category
+- `/kruzembeds delete` - Delete embeds or categories
 
 ### 🛡️ Moderation Commands
 - `/kruzwarn` - Issue warnings to users (requires kick_members permission)
 - `/rules` - Display server rules
-- `/channelindex` - Show server channel structure
+- `/channels` - Show server channel structure
 
 ### ⚙️ Administrative Commands
 - `/kruzbot settings` - View current configuration
@@ -34,21 +31,25 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### 🎨 Meme Management
 - `/kruzmemes enable/disable` - Toggle meme posting
-- `/kruzmemes status` - Check meme posting status
-- `/kruzmemes interval` - Set posting interval
-- `/kruzmemes addblockedkeyword` - Add filtered words
-- `/kruzmemes removeblockedkeyword` - Remove filtered words
-- `/kruzmemes listblockedkeywords` - View filtered words
+- `/kruzmemes block` - Add filtered words
+- `/kruzmemes unblock` - Remove filtered words
+- `/kruzmemes` - Set posting interval
 
 ## Setup
 
 1. Clone this repository
 2. Copy .env.example to .env
 3. Fill in your credentials in .env:
-   - Get Discord credentials from Discord Developer Portal
-   - Get Reddit credentials from Reddit Apps
-4. Install requirements: pip install -r requirements.txt
-5. Run the bot: python main.py
+   ```env
+   DISCORD_TOKEN=your_discord_token_here
+   DISCORD_GUILD_ID=your_guild_id_here
+   MEME_CHANNEL_ID=your_meme_channel_id_here
+   REDDIT_CLIENT_ID=your_reddit_client_id_here
+   REDDIT_CLIENT_SECRET=your_reddit_client_secret_here
+   REDDIT_USER_AGENT=your_reddit_user_agent_here
+   ```
+4. Install requirements: `pip install -r requirements.txt`
+5. Run the bot: `python main.py`
 
 ## Technical Details
 
@@ -61,6 +62,7 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### 💾 Data Storage
 - JSON-based configuration files
+- Organized data directory structure
 - Memory-efficient data management
 - Automatic data cleanup
 - Periodic storage optimization
@@ -77,6 +79,9 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - Batched file operations
 - Command cooldowns
 - Optimized data structures
+- Asynchronous operations
+
+### 📁 File Structure
 
 ## Requirements
 - Python 3.8+

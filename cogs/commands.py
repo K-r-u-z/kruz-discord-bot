@@ -2,8 +2,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from config import GUILD_ID, BOT_SETTINGS
-import asyncio
 import time
+from typing import Optional, Dict, Any, List, Union
+import json
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Convert hex color string to int
 EMBED_COLOR = int(BOT_SETTINGS["embed_color"], 16)
@@ -11,143 +16,1135 @@ EMBED_COLOR = int(BOT_SETTINGS["embed_color"], 16)
 GUILD = discord.Object(id=GUILD_ID)
 
 class ServerCommands(commands.Cog):
-    def __init__(self, bot):
+    """Cog for managing server commands and embeds"""
+
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._command_cooldowns = {}
+        self._command_cooldowns: Dict[int, float] = {}
         self._cooldown_duration = 5  # seconds
+        
+        # File paths
+        self.ids_file = 'data/embedded_messages_ids.json'
+        self.contents_file = 'data/embed_contents.json'
+        
+        # Load data
+        self.message_ids = self.load_message_ids()
+        self.embed_contents = self.load_embed_contents()
+        self.migrate_embed_contents()
+
+    def load_message_ids(self) -> Dict[str, Any]:
+        """Load message IDs from file with error handling"""
+        try:
+            # Create data directory if it doesn't exist
+            os.makedirs('data', exist_ok=True)
+            
+            if os.path.exists(self.ids_file):
+                with open(self.ids_file, 'r') as f:
+                    return json.load(f)
+            
+            # Create empty file if not exists
+            empty_ids: Dict[str, Any] = {}
+            self._save_json(self.ids_file, empty_ids)
+            return empty_ids
+            
+        except Exception as e:
+            logger.error(f"Error loading message IDs: {e}")
+            return {}
+
+    def load_embed_contents(self) -> Dict[str, Any]:
+        """Load embed contents from file with error handling"""
+        try:
+            if os.path.exists(self.contents_file):
+                with open(self.contents_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            
+            # Create empty file if not exists
+            empty_contents: Dict[str, Any] = {}
+            self._save_json(self.contents_file, empty_contents, encoding='utf-8')
+            return empty_contents
+            
+        except Exception as e:
+            logger.error(f"Error loading embed contents: {e}")
+            return {}
+
+    def _save_json(
+        self,
+        filename: str,
+        data: Dict[str, Any],
+        encoding: Optional[str] = None
+    ) -> None:
+        """Save data to JSON file with error handling"""
+        try:
+            kwargs = {}
+            if encoding:
+                kwargs['encoding'] = encoding
+            
+            with open(filename, 'w', **kwargs) as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+                
+        except Exception as e:
+            logger.error(f"Error saving to {filename}: {e}")
+            raise
+
+    def save_message_ids(self) -> None:
+        """Save message IDs to file"""
+        try:
+            self._save_json(self.ids_file, self.message_ids)
+        except Exception as e:
+            logger.error(f"Error saving message IDs: {e}")
+
+    def save_embed_contents(self) -> None:
+        """Save embed contents to file"""
+        try:
+            self._save_json(self.contents_file, self.embed_contents, encoding='utf-8')
+        except Exception as e:
+            logger.error(f"Error saving embed contents: {e}")
+
+    async def store_message_id(
+        self,
+        message_type: str,
+        message_id: str,
+        embed_name: Optional[str] = None
+    ) -> None:
+        """Store a message ID with validation
+        
+        Args:
+            message_type: Category of the message
+            message_id: Discord message ID to store
+            embed_name: Optional name for the embed
+        """
+        try:
+            if not message_type or not message_id:
+                raise ValueError("message_type and message_id are required")
+            
+            if message_type == "rules":
+                self.message_ids["rules"] = message_id
+            else:
+                if message_type not in self.message_ids:
+                    self.message_ids[message_type] = {}
+                if embed_name:
+                    self.message_ids[message_type][embed_name] = message_id
+                else:
+                    self.message_ids[message_type] = message_id
+            
+            self.save_message_ids()
+            
+        except Exception as e:
+            logger.error(f"Error storing message ID: {e}")
+            raise
 
     async def _check_cooldown(self, user_id: int) -> bool:
+        """Check if user is on cooldown
+        
+        Args:
+            user_id: Discord user ID to check
+            
+        Returns:
+            bool: True if user can use command, False if on cooldown
+        """
+        current_time = time.time()
         if user_id in self._command_cooldowns:
-            last_use = self._command_cooldowns[user_id]
-            if time.time() - last_use < self._cooldown_duration:
+            if current_time - self._command_cooldowns[user_id] < self._cooldown_duration:
                 return False
-        self._command_cooldowns[user_id] = time.time()
+        self._command_cooldowns[user_id] = current_time
         return True
 
-    @app_commands.command(name="rules", description="Sends the rules embed.")
+    async def get_current_content(
+        self,
+        embed_category: str,
+        embed_name: str
+    ) -> Dict[str, Optional[str]]:
+        """Get the current content for a specific embed
+        
+        Args:
+            embed_category: Category of the embed
+            embed_name: Name of the embed
+            
+        Returns:
+            Dict containing content and optional footer
+        """
+        try:
+            if embed_category in self.embed_contents:
+                if embed_name in self.embed_contents[embed_category]:
+                    content = self.embed_contents[embed_category][embed_name]
+                    if isinstance(content, dict):
+                        return {
+                            "content": content.get("content", ""),
+                            "footer": content.get("footer", "")[:100] if content.get("footer") else None
+                        }
+                    # Handle old string format
+                    return {
+                        "content": content,
+                        "footer": None
+                    }
+            return {"content": "", "footer": None}
+            
+        except Exception as e:
+            logger.error(f"Error getting embed content: {e}")
+            return {"content": "", "footer": None}
+
+    def migrate_embed_contents(self) -> None:
+        """Migrate old string content format to new dict format"""
+        try:
+            modified = False
+            for category in self.embed_contents:
+                for name in self.embed_contents[category].copy():
+                    content = self.embed_contents[category][name]
+                    if isinstance(content, str):
+                        self.embed_contents[category][name] = {
+                            "content": content,
+                            "footer": None
+                        }
+                        modified = True
+            
+            if modified:
+                self.save_embed_contents()
+                logger.info("Successfully migrated embed contents to new format")
+            
+        except Exception as e:
+            logger.error(f"Error migrating embed contents: {e}")
+
+    async def _create_rules_embeds(self) -> List[discord.Embed]:
+        """Create rules embeds
+        
+        Returns:
+            List of discord.Embed objects for rules
+        """
+        rules = self.embed_contents.get("rules", {})
+        embeds = []
+        
+        # Create welcome embed first
+        if "welcome" in rules:
+            embed = await self._create_welcome_embed(rules["welcome"])
+            if embed:
+                embeds.append(embed)
+        
+        # Add rule sections in order
+        rule_names = sorted([name for name in rules.keys() if name != "welcome"])
+        for i, name in enumerate(rule_names):
+            is_last = (i == len(rule_names) - 1)
+            embed = await self._create_rule_section_embed(
+                rules[name],
+                is_last_section=is_last
+            )
+            if embed:
+                embeds.append(embed)
+                    
+        return embeds
+
+    async def _create_welcome_embed(
+        self,
+        content: Union[Dict[str, Any], str]
+    ) -> Optional[discord.Embed]:
+        """Create welcome section embed"""
+        try:
+            description = (
+                content["content"] if isinstance(content, dict)
+                else content
+            )
+            footer = (
+                content.get("footer") if isinstance(content, dict)
+                else None
+            )
+            
+            embed = discord.Embed(
+                title=f"{BOT_SETTINGS['server_name']} Rules",
+                description=description,
+                              color=EMBED_COLOR
+        )
+            
+            if footer:
+                embed.set_footer(text=footer.replace("\\n", "\n"))
+                
+            return embed
+            
+        except Exception as e:
+            logger.error(f"Error creating welcome embed: {e}")
+            return None
+
+    async def _create_rule_section_embed(
+        self,
+        content: Union[Dict[str, Any], str],
+        is_last_section: bool = False
+    ) -> Optional[discord.Embed]:
+        """Create numbered rule section embed"""
+        try:
+            description = (
+                content["content"] if isinstance(content, dict)
+                else content
+            )
+            footer = (
+                content.get("footer") if isinstance(content, dict)
+                else None
+            )
+            
+            embed = discord.Embed(
+                description=description,
+                color=EMBED_COLOR
+            )
+            
+            if footer:
+                embed.set_footer(text=footer.replace("\\n", "\n"))
+            elif is_last_section:
+                embed.set_footer(
+                    text=f"Thank you for following our server rules,\n{BOT_SETTINGS['server_name']}"
+                )
+            
+            return embed
+            
+        except Exception as e:
+            logger.error(f"Error creating rule section embed: {e}")
+            return None
+
+    @app_commands.command(
+        name="rules",
+        description="Display server rules"
+    )
     @app_commands.guilds(GUILD)
-    async def getRules(self, interaction: discord.Interaction):
-        if not await self._check_cooldown(interaction.user.id):
+    async def get_rules(self, interaction: discord.Interaction) -> None:
+        """Display server rules command"""
+        try:
+            if not await self._check_cooldown(interaction.user.id):
+                await interaction.response.send_message(
+                    "Please wait a few seconds before using this command again.",
+                    ephemeral=True
+                )
+                return
+
+            # Try to delete old message
+            await self._delete_old_message("rules", interaction)
+
+            # Create rule embeds
+            embeds = await self._create_rules_embeds()
+            if not embeds:
+                await interaction.response.send_message(
+                    "No rules content found! Please create rules first.",
+                    ephemeral=True
+                )
+                return
+            
+            # Send rules
+            await interaction.response.defer(ephemeral=True)
+            message = await interaction.channel.send(embeds=embeds)
+            
+            # Store message ID
+            await self.store_message_id("rules", str(message.id))
+            await interaction.delete_original_response()
+            
+        except Exception as e:
+            logger.error(f"Error in rules command: {e}")
             await interaction.response.send_message(
-                "Please wait a few seconds before using this command again.",
+                "An error occurred while displaying rules.",
+                ephemeral=True
+            )
+
+    async def _delete_old_message(
+        self,
+        message_type: str,
+        interaction: discord.Interaction
+    ) -> None:
+        """Delete old message of given type if it exists"""
+        try:
+            message_id = self.message_ids.get(message_type)
+            if message_id:
+                channel = interaction.channel
+                try:
+                    old_message = await channel.fetch_message(int(message_id))
+                    await old_message.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass  # Message already deleted or no permission
+                    
+        except Exception as e:
+            logger.error(f"Error deleting old message: {e}")
+
+    async def _create_channel_embeds(self) -> List[discord.Embed]:
+        """Create channel index embeds
+        
+        Returns:
+            List of discord.Embed objects for channel index
+        """
+        channels = self.embed_contents.get("channels", {})
+        embeds = []
+        
+        # Order of sections
+        sections = ["info", "chat", "news", "offtopic", "games", "gaming"]
+        
+        for section in sections:
+            if section in channels:
+                embed = await self._create_channel_section_embed(channels[section])
+                if embed:
+                    embeds.append(embed)
+                    
+        return embeds
+
+    async def _create_channel_section_embed(
+        self,
+        content: Union[Dict[str, Any], str]
+    ) -> Optional[discord.Embed]:
+        """Create channel section embed"""
+        try:
+            description = (
+                content["content"] if isinstance(content, dict)
+                else content
+            )
+            footer = (
+                content.get("footer") if isinstance(content, dict)
+                else None
+            )
+            
+            embed = discord.Embed(
+                description=description,
+                color=EMBED_COLOR
+            )
+            
+            if footer:
+                embed.set_footer(text=footer.replace("\\n", "\n"))
+            
+            return embed
+            
+        except Exception as e:
+            logger.error(f"Error creating channel section embed: {e}")
+            return None
+
+    @app_commands.command(
+        name="channels",
+        description="Display server channel index"
+    )
+    @app_commands.guilds(GUILD)
+    async def get_channels(self, interaction: discord.Interaction) -> None:
+        """Display server channel index command"""
+        try:
+            if not await self._check_cooldown(interaction.user.id):
+                await interaction.response.send_message(
+                    "Please wait a few seconds before using this command again.",
+                    ephemeral=True
+                )
+                return
+
+            # Try to delete old message
+            await self._delete_old_message("channels", interaction)
+
+            # Create channel embeds
+            embeds = await self._create_channel_embeds()
+            if not embeds:
+                await interaction.response.send_message(
+                    "No channel index content found! Please create channel index first.",
+                    ephemeral=True
+                )
+                return
+
+            # Send channel index
+            await interaction.response.defer(ephemeral=True)
+            message = await interaction.channel.send(embeds=embeds)
+            
+            # Store message ID
+            await self.store_message_id("channels", str(message.id))
+            await interaction.delete_original_response()
+            
+        except Exception as e:
+            logger.error(f"Error in channels command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while displaying channel index.",
+                ephemeral=True
+            )
+
+    # Create the parent command group
+    kruzembeds = app_commands.Group(
+        name="kruzembeds",
+        description="Manage server embeds",
+        guild_ids=[GUILD_ID]
+    )
+
+    @kruzembeds.command(name="list", description="List all available embed categories")
+    async def list_embed_categories(self, interaction: discord.Interaction) -> None:
+        """List all available embed categories and their contents"""
+        try:
+            embed = discord.Embed(
+                title="Available Embed Categories",
+                description="All available embed categories and their contents",
+                color=EMBED_COLOR
+            )
+            
+            for category in sorted(self.embed_contents.keys()):
+                embeds_list = sorted(self.embed_contents[category].keys())
+                embeds_text = "\n".join(f"• {name}" for name in embeds_list)
+                
+                embed.add_field(
+                    name=f"📁 {category.title()}",
+                    value=embeds_text or "*No embeds*",
+                    inline=False
+                )
+
+            await interaction.response.send_message(
+                embed=embed,
+                ephemeral=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Error listing embed categories: {e}")
+            await interaction.response.send_message(
+                "An error occurred while listing categories.",
+                ephemeral=True
+            )
+
+    @kruzembeds.command(name="create", description="Create a new embed")
+    @app_commands.describe(
+        category="Category for the new embed",
+        name="Name of the new embed",
+        title="Title for the embed (optional)",
+        content="Content for the embed",
+        footer="Footer text (optional)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def create_embed(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        name: str,
+        content: str,
+        title: Optional[str] = None,
+        footer: Optional[str] = None
+    ) -> None:
+        """Create a new embed"""
+        try:
+            # Initialize category if it doesn't exist
+            if category not in self.embed_contents:
+                self.embed_contents[category] = {}
+            
+            # Check if embed already exists
+            if name in self.embed_contents[category]:
+                await interaction.response.send_message(
+                    f"An embed named '{name}' already exists in category '{category}'!",
+                    ephemeral=True
+                )
+                return
+
+            # Format content
+            formatted_content = {
+                "content": f"**{title}**\n{content}" if title else content,
+                "footer": footer
+            }
+            
+            # Store the content
+            self.embed_contents[category][name] = formatted_content
+            self.save_embed_contents()
+            
+            # Create and send the embed
+            embed = await self._create_embed(category, name, formatted_content)
+            if not embed:
+                raise ValueError("Failed to create embed")
+                
+            message = await interaction.channel.send(embed=embed)
+            
+            # Store message ID
+            if category not in self.message_ids:
+                self.message_ids[category] = {}
+            self.message_ids[category][name] = str(message.id)
+            self.save_message_ids()
+
+            await interaction.response.send_message(
+                f"Successfully created embed '{name}' in category '{category}'!",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            logger.error(f"Error creating embed: {e}")
+            await interaction.response.send_message(
+                "An error occurred while creating the embed.",
+                ephemeral=True
+            )
+
+    async def _create_embed(
+        self,
+        category: str,
+        name: str,
+        content: Optional[Dict[str, Any]] = None
+    ) -> Optional[discord.Embed]:
+        """Create an embed from content"""
+        try:
+            if not content:
+                if category not in self.embed_contents or name not in self.embed_contents[category]:
+                    logger.error(f"Content not found for {category}/{name}")
+                    return None
+                content = self.embed_contents[category][name]
+
+            # Special handling for rules category
+            if category == "rules":
+                embed = await self._create_rule_section_embed(content)
+                return embed
+                
+            # Normal embed handling
+            description = content["content"]
+            footer = content.get("footer")
+            title = content.get("title")  # Get title, might be None
+            
+            embed = discord.Embed(
+                description=description,
+                color=EMBED_COLOR
+            )
+            
+            # Only set title if it exists
+            if title:
+                embed.title = title
+            
+            if footer:
+                embed.set_footer(text=footer.replace("\\n", "\n"))
+                
+            return embed
+            
+        except Exception as e:
+            logger.error(f"Error creating embed: {e}")
+            return None
+
+    @kruzembeds.command(name="edit", description="Edit server embeds")
+    @app_commands.describe(
+        category="Category of embed to edit",
+        name="Name of the embed to edit",
+        update_id="Whether to update stored message ID",
+        message_id="Message ID to update (optional)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def edit_embeds(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        name: Optional[str] = None,
+        update_id: bool = False,
+        message_id: Optional[str] = None
+    ) -> None:
+        """Edit server embeds command"""
+        try:
+            # Handle ID update for rules/channels
+            if update_id and message_id and category in ["rules", "channels"]:
+                self.message_ids[category] = message_id
+                self.save_message_ids()
+                await interaction.response.send_message(
+                    f"Successfully updated message ID for {category}!",
+                    ephemeral=True
+                )
+                return
+                
+            # Regular edit requires embed_name
+            if not name:
+                await interaction.response.send_message(
+                    "Please provide an embed_name to edit content!",
+                    ephemeral=True
+                )
+                return
+
+            # Get current content
+            current_content = await self.get_current_content(category, name)
+            if not current_content:
+                await interaction.response.send_message(
+                    f"No content found for {category}/{name}!",
+                    ephemeral=True
+                )
+                return
+
+            # Create and send edit modal
+            await self._show_edit_modal(
+                interaction,
+                category,
+                name,
+                current_content,
+                message_id,
+                update_id
+            )
+
+        except Exception as e:
+            logger.error(f"Error in edit_embeds command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while editing embed.",
+                ephemeral=True
+            )
+
+    async def _show_edit_modal(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        name: str,
+        current_content: Dict[str, Optional[str]],
+        message_id: Optional[str],
+        update_id: bool
+    ) -> None:
+        """Show edit modal for embed content"""
+        
+        class EditModal(discord.ui.Modal):
+            def __init__(
+                self,
+                cog: ServerCommands,
+                title: str = f"Edit {category.title()} - {name}"
+            ) -> None:
+                super().__init__(title=title)
+                self.cog = cog
+                
+                # Get the stored content
+                stored_content = cog.embed_contents[category][name]
+                
+                # Extract current content and title
+                content = stored_content.get("content", "")
+                footer = stored_content.get("footer", "")
+                current_title = stored_content.get("title", "")  # Get stored title
+                
+                # Create form fields
+                self.title_input = discord.ui.TextInput(
+                    label="Title",
+                    style=discord.TextStyle.short,
+                    placeholder="Enter the title here...",
+                    default=current_title,
+                    required=False,
+                    max_length=256
+                )
+                self.content = discord.ui.TextInput(
+                    label="Content",
+                    style=discord.TextStyle.paragraph,
+                    placeholder="Enter the content here...",
+                    default=content,
+                    required=True,
+                    max_length=4000
+                )
+                self.footer = discord.ui.TextInput(
+                    label="Footer",
+                    style=discord.TextStyle.paragraph,
+                    placeholder="Enter footer text (optional)...",
+                    default=footer if footer else "",
+                    required=False,
+                    max_length=100
+                )
+                
+                # Add form fields
+                self.add_item(self.title_input)
+                self.add_item(self.content)
+                self.add_item(self.footer)
+
+            async def on_submit(self, interaction: discord.Interaction) -> None:
+                try:
+                    # Format content
+                    title = str(self.title_input).strip() if self.title_input.value else None
+                    content = str(self.content).replace("\\n", "\n")
+                    footer = str(self.footer).replace("\\n", "\n") if self.footer.value else None
+                    
+                    # Store content without title in content field
+                    formatted_content = {
+                        "content": content,
+                        "footer": footer,
+                        "title": title  # Will be None if empty
+                    }
+                    
+                    # Initialize category if it doesn't exist
+                    if category not in self.cog.embed_contents:
+                        self.cog.embed_contents[category] = {}
+                    
+                    # Store the content
+                    self.cog.embed_contents[category][name] = formatted_content
+                    self.cog.save_embed_contents()
+
+                    # Update message if needed
+                    success = await self._update_message(interaction, category, name, message_id)
+
+                    await interaction.response.send_message(
+                        f"Successfully updated {category}/{name}!",
+                        ephemeral=True
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error in edit modal submit: {e}")
+                    await interaction.response.send_message(
+                        "An error occurred while saving changes.",
+                        ephemeral=True
+                    )
+
+            async def _update_message(
+                self,
+                interaction: discord.Interaction,
+                category: str,
+                name: str,
+                message_id: Optional[str]
+            ) -> bool:
+                """Update existing message with new content"""
+                try:
+                    # First try to get message ID from parameter
+                    msg_id = message_id
+                    
+                    # If no message ID provided, try to get from stored IDs
+                    if not msg_id:
+                        if category == "rules":
+                            msg_id = self.cog.message_ids.get("rules")
+                            if msg_id:
+                                # Create and update all rule embeds
+                                embeds = await self.cog._create_rules_embeds()
+                                if embeds:
+                                    channel = interaction.channel
+                                    message = await channel.fetch_message(int(msg_id))
+                                    await message.edit(embeds=embeds)
+                                    return True
+                            return False
+                        elif category == "channels":
+                            msg_id = self.cog.message_ids.get("channels")
+                        elif category in self.cog.message_ids:
+                            # Check if it's a category post or individual embed
+                            if isinstance(self.cog.message_ids[category], dict):
+                                msg_id = self.cog.message_ids[category].get(name)
+                            else:
+                                # It's a category post, update all embeds
+                                msg_id = self.cog.message_ids[category]
+                                channel = interaction.channel
+                                try:
+                                    message = await channel.fetch_message(int(msg_id))
+                                    embeds = []
+                                    for embed_name in sorted(self.cog.embed_contents[category].keys()):
+                                        embed = await self.cog._create_embed(category, embed_name)
+                                        if embed:
+                                            embeds.append(embed)
+                                    if embeds:
+                                        await message.edit(embeds=embeds)
+                                        return True
+                                except Exception as e:
+                                    logger.error(f"Error updating category message: {e}")
+                                return False
+
+                    if not msg_id:
+                        return False
+
+                    # Get the channel and message
+                    channel = interaction.channel
+                    try:
+                        message = await channel.fetch_message(int(msg_id))
+                        
+                        # Create new embed with updated content
+                        if category == "rules":
+                            return await self.cog.update_rules_message(interaction, msg_id)
+                        elif category == "channels":
+                            return await self.cog.update_channels_message(interaction, msg_id)
+                        else:
+                            embed = await self.cog._create_embed(category, name)
+                            if embed:
+                                await message.edit(embed=embed)
+                                return True
+                            
+                    except discord.NotFound:
+                        logger.warning(f"Message {msg_id} not found")
+                    except discord.Forbidden:
+                        logger.warning("Missing permissions to edit message")
+                    return False
+
+                except Exception as e:
+                    logger.error(f"Error in _update_message: {e}")
+                    return False
+
+        # Show the modal
+        await interaction.response.send_modal(EditModal(self))
+
+    @kruzembeds.command(name="post", description="Post an embed or all embeds from a category")
+    @app_commands.describe(
+        category="Category of the embed(s)",
+        name="Name of the specific embed to post (leave empty to post all from category)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def post_embed(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        name: Optional[str] = None
+    ) -> None:
+        """Post a specific embed or all embeds from a category"""
+        try:
+            if category not in self.embed_contents:
+                await interaction.response.send_message(
+                    f"Category '{category}' not found!",
+                    ephemeral=True
+                )
+                return
+
+            # Posting all embeds from category
+            if name is None:
+                embeds = []
+                for embed_name in sorted(self.embed_contents[category].keys()):
+                    embed = await self._create_embed(category, embed_name)
+                    if embed:
+                        embeds.append(embed)
+
+                if not embeds:
+                    await interaction.response.send_message(
+                        f"No embeds found in category '{category}'!",
+                        ephemeral=True
+                    )
+                    return
+
+                # Delete old messages if they exist
+                if category in self.message_ids:
+                    if isinstance(self.message_ids[category], dict):
+                        for old_name in self.message_ids[category]:
+                            await self._delete_embed_message(interaction, category, old_name)
+            else:
+                await self._delete_embed_message(interaction, category)
+
+            # Send all embeds
+            message = await interaction.channel.send(embeds=embeds)
+            
+            # Store message ID for the category
+            if isinstance(self.message_ids.get(category, {}), dict):
+                # Convert from dict to single ID for category posts
+                self.message_ids[category] = str(message.id)
+            else:
+                self.message_ids[category] = str(message.id)
+            self.save_message_ids()
+
+            await interaction.response.send_message(
+                f"Successfully posted all embeds from category '{category}'!",
                 ephemeral=True
             )
             return
-        # Server rules overview
-        embed1 = discord.Embed(
-            title=f"{BOT_SETTINGS['server_name']} Rules", 
-            description=f"The **{BOT_SETTINGS['server_name']}** Discord server is a Public Community Server, and as such the server is held to a higher standard by Discord than a none public server. We expect all members of the server including staff to conduct themselves in an appropriate manner at all times.\n\n Please note that staff in the server reserve the right to issues actions against members at their discretion, if you feel that an action taken against you is wrong, you are welcome to submit a complaint via the https://discord.com/channels/1210120154562953216/1339588584881131582", 
-            color=EMBED_COLOR
-        )
-        
-        # Rules 1-5
-        embed2 = discord.Embed(
-            description="1 - **Civility and respect**\nPlease keep all messages civil and respectful, treat each other with respect, even if you disagree. If you cannot do that them block them. An example of uncivil/disrespectful comments may be \"don't be so stupid\" \"don't make comments on a topic you know nothing about.\"\n\n"
-                              "2 - **Trolling**\nTrolling is not allowed in this server, do not make posts or comments in this server to deliberately upset/wind up others. An example of trolling comments may be \"Kruz is stupid\" or \"This political party sucks\".\n\n"
-                              f"3 - **Inappropriate Content**\nThe {BOT_SETTINGS['server_name']} server is an 18+ server, and we have a NSFW channel. Please post any content that is not safe for work in the server's dedicated #｜nsfw channel. This includes drugs, graphic or vulgar content, offensive memes, gore and images of dead bodies. Avoid posting pornographic content as that is not what our server is about. Please note that violation of this rule could lead to a permanent ban. This includes GIFs and Memes.\n\n"
-                              "4 - **Sensitive messages**\nOur server includes a lot of news so naturally there may be content posted that falls within discords ToS but could be upsetting, we ask that you mark potentially upsetting content with the spoiler tag. An example of this could be if you post news about Sexual Assault, Abuse, Racism etc.\n\n"
-                              "5 - **Fake news/Conspiracy theories/Disinformation**\nPosting disinformation is against Discord ToS. Please only post articles from a reliable source with a reputation, please do not post misinformation in the server - all links are subject to removal by the server staff. For example, please do not post articles from \"The Onion\" as pass it off as news.", 
-                              color=EMBED_COLOR
-        )
-        
-        # Rules 6-10
-        embed3 = discord.Embed(
-            description="6 - **No Hate Speech**\nEveryone is welcome in this server regardless of race, ethnicity, political views, sex, gender identity/expression, sexuality or any other identity they may hold. Discrimination/hate against someone for one or more of their identities is prohibited. For example, using a racial slur. Please note that breaking this rule can result in an instant ban. **_(EX. If you call somebody a \"xyz\" make sure its in a joking manner and you are not insulting someone.)_**\n\n"
-                              "7 - **Dog Piling**\nPlease do not dog pile on people (dog pilling is a group of people ganging up on one person)\n\n"
-                              "8 - **Self Promotion**\nSelf-promotion is strictly prohibited unless permission has been given. Please create a ticket for more information.\n\n"
-                              "9 - **Channel Usage**\nPlease use all channels for their intended purpose, if a member of staff asks you to move to another channel, please do so on the first request. For example, we like to keep news out of General Chat. Gifs & Memes should go in the appropriate channel.\n\n"
-                              "10 - **Drama**\nPlease do not engage in drama within the server, do not create, encourage or bring drama from other places. For example, do not reference blocked chatters or drama that is external.", 
-                              color=EMBED_COLOR
-        )
-        
-        # Rules 11-15
-        embed4 = discord.Embed(
-            description="11 - **Unsolicited Messages**\nPlease do not send unsolicited DMs to people in the server this includes random server invites, links and general unsolicited chatter. It is encouraged that all server members turn direct messages off for people not on their friends list.\n\n"
-                              "12 - **English Only**\nPlease keep all messages in the server in English so the server staff can understand your messages, content written in none English will be deleted. If you post an embed in a language other than English, please provide the translation.\n\n"
-                              "13 - **Names/Profile**\nPlease keep your discord name/profile appropriate when in the server. You can right click your name and change is for this server only if you wish. Mods reserve the right to change chatter's names without their consent. Your profile picture and bio should also be appropriate.\n\n"
-                              f"14 - **Extremism**\nAny form of extremism is prohibited in the {BOT_SETTINGS['server_name']} server. If you show an extremist view, you may be banned without warning. For example, sympathising with organisations prescribed as terrorist by the US Government or saying comments such as \"kill all XYZ\"\n\n"
-                              "15 - **Political parties and politicians names**\nPlease refer to political parties and politicians by their correct names. Breaking this rule means you are breaking the civility rule and will incur infractions.", 
-                              color=EMBED_COLOR
-        )
-        embed4.set_footer(text=f"Thank you for following our server rules,\n{BOT_SETTINGS['server_name']}")
-        
-        await interaction.response.defer(ephemeral=True)
-        await interaction.delete_original_response()
-        await interaction.channel.send(embeds=[embed1, embed2, embed3, embed4])
 
-    @app_commands.command(name="channelindex", description="Shows the server channel index.")
-    @app_commands.guilds(GUILD)
-    async def getChannelIndex(self, interaction: discord.Interaction):
-        # Server channels
-        embed1 = discord.Embed(
-            description="**__Make sure \"Show All Channels\" is selected to keep up with newly added channels or changes!__**\n\n"
-            "## **Server Channel Index:**\n\n"
-            "https://discord.com/channels/1210120154562953216/1339596616780222525 - Server wide announcements will be made in this channel such as server updates.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339588561879564400 - Changes made to the server are logged in this channel such as the addition of a focus channel or a focus channel being made read only.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339588584881131582 - This channel can be used to report other members of the server or raise complaints/give feedback.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339596982305558578 - Server rules.\n\n",
-            color=EMBED_COLOR
-        )
-        
-        # Chat channels
-        embed2 = discord.Embed(
-            description="## **Chat Channels:**\n\n"
-            "https://discord.com/channels/1210120154562953216/1339588095443599449 - This channel is where members can generally talk about anything they like with the community.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339588141044203551 - This channel can be used to post gifs and memes, please note that gifs and memes should always be SFW unless posted in NSFW channel and abide by the server https://discord.com/channels/1210120154562953216/1339596982305558578\n\n",
-            color=EMBED_COLOR
-        )
-        
-        # News channels
-        embed3 = discord.Embed(
-            description="## **News Channels:**\n\n"
-            "https://discord.com/channels/1210120154562953216/1339589096556986482 - News discussion channel\n\n"
-            "https://discord.com/channels/1210120154562953216/1339589117465333811 - Weather discussion and live updates channel.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339589184066818060 - Live Earthquakes & Tsunami reports + discussion.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339589235065356470 - Twitter/X post from trusted sources.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339712763395706951 - YT channels that go live covering top news & weather.\n\n",
-            color=EMBED_COLOR
-        )
-        
-        # Conflict channels
-        embed4 = discord.Embed(
-            description="## **Conflict Channels:**\n\n"
-            "https://discord.com/channels/1210120154562953216/1339715328074322071 - Discuss and view Ukraine/Russia war news.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339715534253457429 - Discuss and view the Middle-East conflicts.\n\n",
-            color=EMBED_COLOR
-        )
-        
-        # Off-topic forums
-        embed5 = discord.Embed(
-            description="## **Off-Topic Forums:**\n\n"
-            "https://discord.com/channels/1210120154562953216/1339702431918854247 - Create threads about anything.\n\n",
-            color=EMBED_COLOR
-        )
-        
-        # Server games
-        embed_games = discord.Embed(
-            description="## **Server Games:**\n\n"
-            "https://discord.com/channels/1210120154562953216/1340944247309729803 - Participate in the server's [dank memer](https://discord.gg/memers) lottery by using: /lottery buy or /lottery auto\n\n"
-            "https://discord.com/channels/1210120154562953216/1340935958815703060 - The Game Events will be held here.\n\n"
-            "https://discord.com/channels/1210120154562953216/1340931099643220044 - Play Trivia, Connect4, Rock Paper Scissors, Tic-Tac-Toe, and more! Complete your work shifts here also!\n\n"
-            "https://discord.com/channels/1210120154562953216/1340931167871959120 - The fishing game! Get started with /fish guide or /fish catch\n\n"
-            "https://discord.com/channels/1210120154562953216/1340933322267820063 - Fight your friends! Get started with /fight quick\n\n"
-            "https://discord.com/channels/1210120154562953216/1340932133841277061 - Get started on your farm with /farm view\n\n"
-            "https://discord.com/channels/1210120154562953216/1340933473183072266 - Make sure you own a rifle! Start hunting with /hunt\n\n"
-            "https://discord.com/channels/1210120154562953216/1340932556656214086 - Rob your friends using /rob or /bankrob\n\n",
-            color=EMBED_COLOR
-        )
-        
-        # Gaming channels
-        embed6 = discord.Embed(
-            description="## **Gaming Channels:**\n\n"
-            "https://discord.com/channels/1210120154562953216/1339586887563870279 - Latest news in the gaming industry.\n\n"
-            "https://discord.com/channels/1210120154562953216/1339587274035167333 - This channel is where members can generally talk about videogames and related news.\n\n",
-            color=EMBED_COLOR
-        )
-        
-        await interaction.response.defer(ephemeral=True)
-        await interaction.delete_original_response()
-        await interaction.channel.send(embeds=[embed1, embed2, embed3, embed4, embed5, embed_games, embed6])
+            # Posting single embed
+            if name not in self.embed_contents[category]:
+                await interaction.response.send_message(
+                    f"Embed '{name}' not found in category '{category}'!",
+                    ephemeral=True
+                )
+                return
+            
+            # Create and send the embed
+            embed = await self._create_embed(category, name)
+            if not embed:
+                raise ValueError("Failed to create embed")
 
-async def setup(bot):
-    await bot.add_cog(ServerCommands(bot)) 
+            message = await interaction.channel.send(embed=embed)
+            
+            # Store message ID
+            if category not in self.message_ids:
+                self.message_ids[category] = {}
+            self.message_ids[category][name] = str(message.id)
+            self.save_message_ids()
+
+            await interaction.response.send_message(
+                f"Successfully posted embed '{name}' from category '{category}'!",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            logger.error(f"Error posting embed: {e}")
+            await interaction.response.send_message(
+                "An error occurred while posting the embed.",
+                ephemeral=True
+            )
+
+    @kruzembeds.command(name="delete", description="Delete an embed category or specific embed")
+    @app_commands.describe(
+        category="Category to delete from",
+        name="Specific embed to delete (optional)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def delete_embed_category(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        name: Optional[str] = None
+    ) -> None:
+        """Delete an embed category or specific embed"""
+        try:
+            if category not in self.embed_contents:
+                await interaction.response.send_message(
+                    f"Category '{category}' not found!",
+                    ephemeral=True
+                )
+                return
+
+            if name:
+                await self._delete_single_embed(
+                    interaction,
+                    category,
+                    name
+                )
+            else:
+                await self._delete_category(
+                    interaction,
+                    category
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in delete command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while deleting.",
+                ephemeral=True
+            )
+
+    async def _delete_single_embed(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        name: str
+    ) -> None:
+        """Delete a single embed"""
+        try:
+            if name not in self.embed_contents[category]:
+                await interaction.response.send_message(
+                    f"Embed '{name}' not found in category '{category}'!",
+                    ephemeral=True
+                )
+                return
+
+            # Delete the embed content
+            del self.embed_contents[category][name]
+            self.save_embed_contents()
+
+            # Update or delete messages based on category type
+            if category == "rules":
+                # Update the rules message with remaining rules
+                msg_id = self.message_ids.get("rules")
+                if msg_id:
+                    await self.update_rules_message(interaction, msg_id)
+            elif category == "channels":
+                # Update the channels message with remaining channels
+                msg_id = self.message_ids.get("channels")
+                if msg_id:
+                    await self.update_channels_message(interaction, msg_id)
+            else:
+                # For category posts, update the full message
+                if isinstance(self.message_ids.get(category), str):
+                    msg_id = self.message_ids[category]
+                    channel = interaction.channel
+                    try:
+                        message = await channel.fetch_message(int(msg_id))
+                        embeds = []
+                        for embed_name in sorted(self.embed_contents[category].keys()):
+                            embed = await self._create_embed(category, embed_name)
+                            if embed:
+                                embeds.append(embed)
+                        if embeds:
+                            await message.edit(embeds=embeds)
+                        else:
+                            await message.delete()
+                            del self.message_ids[category]
+                    except Exception as e:
+                        logger.error(f"Error updating category message: {e}")
+                else:
+                    # Delete individual message
+                    await self._delete_embed_message(interaction, category, name)
+                    if category in self.message_ids and isinstance(self.message_ids[category], dict):
+                        if name in self.message_ids[category]:
+                            del self.message_ids[category][name]
+
+            self.save_message_ids()
+
+            await interaction.response.send_message(
+                f"Successfully deleted embed '{name}' from category '{category}'!",
+                    ephemeral=True
+                )
+            
+        except Exception as e:
+            logger.error(f"Error deleting single embed: {e}")
+            raise
+
+    async def _delete_category(
+        self,
+        interaction: discord.Interaction,
+        category: str
+    ) -> None:
+        """Delete an entire category"""
+        try:
+            # Delete all messages in the category
+            if category in self.message_ids:
+                if isinstance(self.message_ids[category], dict):
+                    for name in self.message_ids[category]:
+                        await self._delete_embed_message(interaction, category, name)
+                else:
+                    await self._delete_embed_message(interaction, category)
+
+            # Delete the category
+            del self.embed_contents[category]
+            if category in self.message_ids:
+                del self.message_ids[category]
+
+            # Save changes
+            self.save_embed_contents()
+            self.save_message_ids()
+
+            await interaction.response.send_message(
+                f"Successfully deleted category '{category}' and all its embeds!",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            logger.error(f"Error deleting category: {e}")
+            raise
+
+    async def _delete_embed_message(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+        name: Optional[str] = None
+    ) -> None:
+        """Delete an embed message"""
+        try:
+            msg_id = None
+            if name:
+                if (category in self.message_ids and
+                    isinstance(self.message_ids[category], dict)):
+                    msg_id = self.message_ids[category].get(name)
+            else:
+                msg_id = self.message_ids.get(category)
+
+            if msg_id:
+                try:
+                    message = await interaction.channel.fetch_message(int(msg_id))
+                    await message.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass  # Message already deleted or no permission
+            
+        except Exception as e:
+            logger.error(f"Error deleting embed message: {e}")
+            # Don't raise - non-critical error
+
+    async def update_rules_message(
+        self,
+        interaction: discord.Interaction,
+        message_id: str
+    ) -> bool:
+        """Update existing rules message with new content"""
+        try:
+            # Create rule embeds
+            embeds = await self._create_rules_embeds()
+            if not embeds:
+                return False
+
+            # Update the existing message
+            channel = interaction.channel
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(embeds=embeds)
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating rules message: {e}")
+            return False
+
+    async def update_channels_message(
+        self,
+        interaction: discord.Interaction,
+        message_id: str
+    ) -> bool:
+        """Update existing channels message with new content"""
+        try:
+            # Create channel embeds
+            embeds = await self._create_channel_embeds()
+            if not embeds:
+                return False
+
+            # Update the existing message
+            channel = interaction.channel
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(embeds=embeds)
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating channels message: {e}")
+            return False
+
+async def setup(bot: commands.Bot) -> None:
+    """Set up the Commands cog"""
+    try:
+        await bot.add_cog(ServerCommands(bot))
+        logger.info("Commands cog loaded successfully")
+    except Exception as e:
+        logger.error(f"Error loading Commands cog: {e}")
+        raise 
