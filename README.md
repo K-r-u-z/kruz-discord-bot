@@ -17,31 +17,60 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 - `DISCORD_TOKEN`: Your Discord bot token
 - `DISCORD_GUILD_ID`: Your Discord server ID
+- `MEME_CHANNEL_ID`: Channel ID where memes will be posted
 - `REDDIT_CLIENT_ID`: Your Reddit application client ID
 - `REDDIT_CLIENT_SECRET`: Your Reddit application secret
 - `REDDIT_USER_AGENT`: Your Reddit user agent string
+
+## Bot Settings
+
+All bot settings are stored in `bot_settings.json`. The bot will create this file with default settings if it doesn't exist:
+
+```json
+{
+    "server_name": "Your Server Name",
+    "status": {
+        "type": "watching",
+        "name": "over {server_name}",
+        "status": "online"
+    },
+    "embed_color": "0xbc69f0"
+}
+```
 
 ## Features
 
 ### Automated Meme Posting
 - Fetches and posts memes from Reddit (r/meme)
-- Content filtering for NSFW and inappropriate content
-- Configurable posting interval
-- Tracks posted memes to avoid duplicates
+- Smart content filtering with extensive blocklist
+- Configurable posting interval (minimum 1 minute)
+- Memory-efficient storage:
+  - Auto-cleanup of old posted memes
+  - Maximum 500 stored meme IDs
+  - Periodic data trimming
+- Commands:
+  - `/kruzmemes` - Control meme functionality:
+    - enable/disable - Toggle meme posting
+    - status - Check current status
+    - interval <minutes> - Set posting interval
+    - addblockedkeyword <word> - Add word to filter
+    - removeblockedkeyword <word> - Remove word from filter
+    - listblockedkeywords - View all blocked words
 
 ### Server Information Commands
 - `/rules` - Displays comprehensive server rules in formatted embeds
 - `/channelindex` - Shows detailed server channel structure and descriptions
 
 ### Moderation Tools
-- `/warn` - Allows moderators to warn users for rule violations
-- Includes DM notification to warned users
-- Requires kick_members permission
+- `/kruzwarn` - Allows moderators to warn users for rule violations
+  - DM notification to warned users
+  - Requires kick_members permission
+  - Includes rule reference and reason
 
 ### Game Information Commands
 - `/lotterymessage` - Information about Dank Memer lottery
 - `/gameeventmessage` - Details about game events
-- `/minigamemessage` - Guide for various mini-games (Trivia, Connect4, etc.)
+- `/minigamemessage` - Guide for various mini-games
 - `/fishinggamemessage` - Information about the fishing game
 - `/fightinggamemessage` - Details about the fighting game system
 - `/farminggamemessage` - Guide for the farming game
@@ -49,16 +78,52 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - `/robbinggamemessage` - Details about robbing mechanics
 
 ### Administrative Commands
-- `/memeposter` - Enable/disable automatic meme posting
-- `/memeinterval` - Adjust the interval between meme posts
-- Requires administrator permissions
+All administrative commands require administrator permissions.
 
-### Error Handling
-- Comprehensive error handling for all commands
-- User-friendly error messages
-- Connection recovery system with exponential backoff
+- `/kruzbot` - Manage bot settings:
+  - settings - View current configuration
+  - setname <name> - Change server name
+  - setstatus <type> <text> [status] - Update bot's status
+  - setcolor <hex> - Change embed color
+
+## Technical Features
+
+### Error Handling & Logging
+- Comprehensive error logging to `bot.log`
+- Structured logging format with timestamps
+- Graceful shutdown handling
+- Connection recovery system
+- Command error feedback
+
+### Performance Optimizations
+- Rate limiting protection
+- Batched file I/O operations
+- Memory-efficient data storage
+- Periodic cleanup of stored data
+- Command cooldowns
 
 ### Security Features
-- Content filtering system for inappropriate content (memes)
-- Rate limiting protection
-- Permission-based command access 
+- Environment variable configuration
+- Permission-based command access
+- Content filtering system
+- Extensive blocklist for inappropriate content
+- Input validation
+
+### Data Persistence
+Settings are stored in JSON files with automatic validation:
+- `bot_settings.json`: Bot-wide settings
+  - Server name
+  - Bot status configuration
+  - Embed colors
+- `meme_settings.json`: Meme-related settings
+  - Blocked words list
+  - Posted meme IDs
+  - Posting interval
+  - Last post timestamp
+
+### Health Monitoring
+- Periodic health checks
+- Discord connection monitoring
+- Reddit API status verification
+- Automatic reconnection
+- Error reporting system 
