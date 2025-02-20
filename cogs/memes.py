@@ -75,7 +75,9 @@ class MemesCog(commands.Cog):
                     self.meme_interval = settings.get("meme_interval", default_settings["meme_interval"])
                     self.last_post_time = settings.get("last_post_time", default_settings["last_post_time"])
                     self.blocked_words = set(settings.get("blocked_words", default_settings["blocked_words"]))
-                    self.posted_memes = set(settings.get("posted_memes", default_settings["posted_memes"]))
+                    # Only keep most recent 500 memes when loading
+                    all_memes = settings.get("posted_memes", default_settings["posted_memes"])
+                    self.posted_memes = set(all_memes[-500:] if len(all_memes) > 500 else all_memes)
             else:
                 # If file doesn't exist, create it with default settings
                 self.meme_interval = default_settings["meme_interval"]
@@ -114,64 +116,63 @@ class MemesCog(commands.Cog):
 
     @tasks.loop(minutes=2)
     async def post_meme(self):
-        current_time = time.time()
-        if current_time - self.last_post_time < self.min_post_interval:
+        if not await self._should_post():
             return
             
         channel = self.bot.get_channel(self.meme_channel_id)
-        if channel:
-            try:
-                async with async_timeout.timeout(60):
-                    async with asyncpraw.Reddit(
-                        client_id=REDDIT_CLIENT_ID,
-                        client_secret=REDDIT_CLIENT_SECRET,
-                        user_agent=REDDIT_USER_AGENT
-                    ) as reddit:
-                        safe_subreddits = ['meme']
-                        subreddit = await reddit.subreddit(random.choice(safe_subreddits))
-                        memes = []
-                        
-                        try:
-                            async with async_timeout.timeout(30):
-                                async for meme in subreddit.top(time_filter='day', limit=100):
-                                    if len(memes) >= 25:
-                                        break
-                                    if self._is_valid_meme(meme):
-                                        memes.append(meme)
-                        except asyncio.TimeoutError:
-                            print("Timeout while fetching memes")
-                            return
+        if not channel:
+            print("Meme channel not found")
+            return
 
-                        if memes:
-                            meme = random.choice(memes)
-                            embed = discord.Embed(
-                                title=meme.title,
-                                url=f"https://reddit.com{meme.permalink}",
-                                color=EMBED_COLOR
-                            )
-                            embed.set_image(url=meme.url)
-                            embed.set_footer(text="See the top new memes on reddit!")
-                            
-                            await channel.send(embed=embed)
-                            self.posted_memes.add(meme.id)
-                            self.save_settings()  # Save everything after posting new meme
-                            
-                            # Trim the posted memes list if it gets too large
-                            if len(self.posted_memes) >= self.max_stored_memes:
-                                self.posted_memes = set(list(self.posted_memes)[-(self.max_stored_memes // 2):])
-                                self.save_settings()  # Save after trimming
-                        else:
-                            print("No new unique memes found")
+        try:
+            async with async_timeout.timeout(30):  # Reduced from 60 to 30 seconds
+                async with asyncpraw.Reddit(
+                    client_id=REDDIT_CLIENT_ID,
+                    client_secret=REDDIT_CLIENT_SECRET,
+                    user_agent=REDDIT_USER_AGENT
+                ) as reddit:
+                    safe_subreddits = ['meme']
+                    subreddit = await reddit.subreddit(random.choice(safe_subreddits))
+                    memes = []
+                    
+                    try:
+                        async with async_timeout.timeout(30):
+                            async for meme in subreddit.top(time_filter='day', limit=100):
+                                if len(memes) >= 25:
+                                    break
+                                if self._is_valid_meme(meme):
+                                    memes.append(meme)
+                    except asyncio.TimeoutError:
+                        print("Timeout while fetching memes")
+                        return
+
+                    if memes:
+                        meme = random.choice(memes)
+                        embed = discord.Embed(
+                            title=meme.title,
+                            url=f"https://reddit.com{meme.permalink}",
+                            color=EMBED_COLOR
+                        )
+                        embed.set_image(url=meme.url)
+                        embed.set_footer(text="See the top new memes on reddit!")
+                        
+                        await channel.send(embed=embed)
+                        self.posted_memes.add(meme.id)
+                        self.save_settings()  # Save everything after posting new meme
+                        
+                        # Trim the posted memes list if it gets too large
+                        if len(self.posted_memes) >= self.max_stored_memes:
+                            self.posted_memes = set(list(self.posted_memes)[-(self.max_stored_memes // 2):])
+                            self.save_settings()  # Save after trimming
+                    else:
+                        print("No new unique memes found")
             
-            except asyncio.TimeoutError:
-                print("Reddit API request timed out")
-                return
-            except Exception as e:
-                print(f"Error in post_meme: {e}")
-                return
-        
-        self.last_post_time = current_time
-        self.save_settings()  # Save the new last post time
+        except asyncio.TimeoutError:
+            print("Reddit API request timed out")
+            await asyncio.sleep(60)  # Back off for a minute
+        except Exception as e:
+            print(f"Error in post_meme: {e}")
+            await asyncio.sleep(30)  # Back off for 30 seconds
 
     @post_meme.before_loop
     async def before_post_meme(self):

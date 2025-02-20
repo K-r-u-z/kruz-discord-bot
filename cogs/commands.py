@@ -14,20 +14,25 @@ class ServerCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._command_cooldowns = {}
+        self._cooldown_duration = 5  # seconds
 
-    async def _check_rate_limit(self, user_id: int, command: str, cooldown: int = 5):
-        """Basic rate limiting"""
-        key = f"{user_id}:{command}"
-        if key in self._command_cooldowns:
-            last_use = self._command_cooldowns[key]
-            if (time.time() - last_use) < cooldown:
+    async def _check_cooldown(self, user_id: int) -> bool:
+        if user_id in self._command_cooldowns:
+            last_use = self._command_cooldowns[user_id]
+            if time.time() - last_use < self._cooldown_duration:
                 return False
-        self._command_cooldowns[key] = time.time()
+        self._command_cooldowns[user_id] = time.time()
         return True
 
     @app_commands.command(name="rules", description="Sends the rules embed.")
     @app_commands.guilds(GUILD)
     async def getRules(self, interaction: discord.Interaction):
+        if not await self._check_cooldown(interaction.user.id):
+            await interaction.response.send_message(
+                "Please wait a few seconds before using this command again.",
+                ephemeral=True
+            )
+            return
         # Server rules overview
         embed1 = discord.Embed(
             title=f"{BOT_SETTINGS['server_name']} Rules", 
