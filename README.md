@@ -34,7 +34,7 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### Welcome Message Commands
 - `/welcome` - Configure welcome message settings
-  - `👋 Test Welcome` - Send a test welcome message
+  - `👋 Test Welcome` - Send a test welcome message (also test the autorole feature if enabled)
   - `📝 Edit Message` - Open modal to edit welcome message
   - `⚙️ Setup Channel` - Set welcome message channel
   - `📋 Show Format` - Show available placeholders and formatting options

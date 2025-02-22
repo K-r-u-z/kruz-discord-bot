@@ -15,7 +15,7 @@ class CustomFormatter(logging.Formatter):
     
     # Colors and styles
     grey = "\x1b[38;1m"
-    blue = "\x1b[36;1m"
+    purple = "\x1b[35;1m"
     yellow = "\x1b[33;1m"
     red = "\x1b[31;1m"
     bold_red = "\x1b[31;1m"
@@ -24,7 +24,7 @@ class CustomFormatter(logging.Formatter):
     # Format for different log levels
     FORMATS = {
         logging.DEBUG: grey + "[DEBUG] %(message)s" + reset,
-        logging.INFO: blue + "[INFO] %(message)s" + reset,
+        logging.INFO: purple + "[INFO] %(message)s" + reset,
         logging.WARNING: yellow + "[WARNING] %(message)s" + reset,
         logging.ERROR: red + "[ERROR] %(message)s" + reset,
         logging.CRITICAL: bold_red + "[CRITICAL] %(message)s" + reset
