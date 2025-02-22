@@ -1,13 +1,9 @@
 {
-    "channel_id": 1340813189998317700,
+    "channel_id": null,
     "enabled": true,
     "message": {
         "title": "Welcome to {server_name}! 👋",
         "description": "Edit your welcome message with `/welcome edit`. View the formatting guide with `/welcome formatting.`",
         "footer": "We currently have {member_count} Members! (Editable)"
-    },
-    "autorole": {
-        "enabled": true,
-        "role_id": 1342634908895678557
     }
 }
