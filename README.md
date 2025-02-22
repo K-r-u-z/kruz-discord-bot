@@ -19,22 +19,51 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 ## Commands
 
 ### Welcome Message Commands
-- `/welcome setup` - Set welcome message channel
-- `/welcome formatting` - Show available placeholders and formatting options
-- `/welcome edit` - Open modal to edit welcome message
-- `/welcome test` - Send a test welcome message
-- `/welcome toggle` - Enable/Disable welcome messages
+- `/welcome` - Configure welcome message settings
+  - `👋 Test Welcome` - Send a test welcome message
+  - `📝 Edit Message` - Open modal to edit welcome message
+  - `⚙️ Setup Channel` - Set welcome message channel
+  - `📋 Show Format` - Show available placeholders and formatting options
+  - `🔄 Toggle System` - Enable/Disable welcome messages
 
 ### Auto-Role Commands
-- `/autorole show` - Display current autorole settings
-- `/autorole set @role` - Set and enable role for new members
-- `/autorole enable` - Enable autorole
-- `/autorole disable` - Disable autorole
+- `/autorole` - Configure automatic role assignment
+  - `👀 Show Settings` - Display current autorole settings
+  - `✨ Set Role` - Set role for new members
+  - `✅ Enable` - Enable autorole
+  - `❌ Disable` - Disable autorole
 
 ### Moderation Commands
-- `/warn @user reason` - Warn a user
-- `/purge amount [#channel]` - Delete multiple messages (1-100)
-- `/cls amount [#channel]` - Alias for purge command
+- `/kruzwarn` - ⚠️ Issue a warning to a user
+  - `👤 User` - The user to warn
+  - `📜 Rule` - The rule that was broken
+  - `📝 Reason` - Additional details about the warning
+
+- `/purge` - 🗑️ Delete multiple messages (1-100)
+- `/cls` - 🧹 Clear messages (defaults to 100)
+
+### Settings Commands
+- `/settings` - Configure bot settings
+  - `📋 Show Settings` - Display current settings
+  - `📝 Change Server Name` - Update server name
+  - `🎨 Change Color` - Update embed color
+  - `🎮 Change Activity` - Set bot's activity
+  - `🔵 Change Status` - Set bot's online status
+
+### Embed Commands
+- `/embed` - Create and manage embedded messages
+  - `📝 Create New` - Create a new embed
+  - `✏️ Edit Existing` - Edit an existing embed
+  - `🗑️ Delete` - Delete an embed
+  - `📋 Show List` - List all embeds
+  - `👀 Preview` - Preview an embed
+
+### Meme Commands
+- `/kruzmemes` - Manage meme poster settings
+  - `✅ Enable` - Enable meme posting
+  - `❌ Disable` - Disable meme posting
+  - `🚫 Block Words` - Add words to block list
+  - `✨ Unblock Words` - Remove words from block list
 
 ## Available Placeholders
 
@@ -49,14 +78,14 @@ Welcome messages support these placeholders:
 ## Text Formatting
 
 Welcome messages support these formatting options in title and description:
-- `**text**` - Bold
-- `__text__` - Underline
-- `*text*` - Italic
-- `***text***` - Bold Italic
-- `__*text*__` - Underline Italic
-- `**__text__**` - Bold Underline
-- `***__text__***` - Bold Italic Underline
-- \`text\` - Inline Code
+- `**text**` - **Bold**
+- `__text__` - __Underline__
+- `*text*` - *Italic*
+- `***text***` - ***Bold Italic***
+- `__*text*__` - __*Underline Italic*__
+- `**__text__**` - **__Bold Underline__**
+- `***__text__***` - ***__Bold Italic Underline__***
+- \`text\` - `Inline Code`
 
 ## Setup
 

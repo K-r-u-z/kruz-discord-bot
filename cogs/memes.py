@@ -22,54 +22,91 @@ GUILD = discord.Object(id=GUILD_ID)
 class MemesCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.meme_task_running = False
+        self.settings_file = 'data/meme_settings.json'
+        self.meme_channel_id = MEME_CHANNEL_ID
         self.is_posting = False
         self.max_stored_memes = 1000
-        self.min_post_interval = 60
-        self.meme_channel_id = MEME_CHANNEL_ID
+        
+        # Default blocked words
+        self.default_blocked_words = [
+            # NSFW content
+            'nsfw', 'nude', 'porn', 'sex', 'xxx', 'onlyfans', 'love', 'jerkoff', 
+            'masturbation', 'masturbate', 'adult', 'explicit', 'lewd', 'uncensored', 
+            'fetish', 'kink', 'bdsm', 'hentai', 'camgirl', 'stripper', 'escort',
+
+            # Violence
+            'gore', 'death', 'kill', 'murder', 'blood', 'suicide', 'dead', 'assault',
+            'abuse', 'torture', 'beating', 'gun', 'shooting', 'stab', 'execution',
+            'bomb', 'terrorist', 'hostage',
+
+            # Hate speech/offensive
+            'racist', 'racism', 'nazi', 'hate', 'slur', 'offensive', 'homophobic',
+            'transphobic', 'sexist', 'bigot', 'discrimination', 'xenophobia',
+            'misogyny', 'misandry',
+
+            # Controversial topics
+            'politics', 'political', 'gender', 'religion', 'religious', 'school',
+            'college', 'university', 'teacher', 'student', 'education', 'war',
+            'genocide', 'fascist', 'communism', 'capitalism', 'election', 'democrat',
+            'republican', 'Biden', 'Trump', 'BLM', 'woke', 'LGBT',
+
+            # Potentially disturbing
+            'disturbing', 'graphic', 'trigger', 'warning', 'sensitive', 'self-harm',
+            'cutting', 'abduction', 'kidnap', 'harassment', 'stalker', 'molestation',
+            'rape', 'incest', 'pedophile', 'trauma',
+
+            # Illegal or unethical content
+            'drugs', 'cocaine', 'meth', 'heroin', 'LSD', 'psychedelic', 'overdose',
+            'dealer', 'crime', 'fraud', 'scam',
+
+            # Other potentially problematic words
+            'mental illness', 'psychopath', 'sociopath', 'maniac', 'crazy', 'insane',
+            'conspiracy', '5G', 'flat earth', 'anti-vax', 'chemtrails'
+        ]
         
         # Load settings
-        self.settings_file = 'data/meme_settings.json'
-        self.settings = self.load_settings()
-        self.meme_interval = self.settings.get('meme_interval', 20)
-        self.last_post_time = self.settings.get('last_post_time', 0)
-        self.blocked_words = set(self.settings.get('blocked_words', []))  # Use set for O(1) lookups
-        self.posted_memes = set(self.settings.get('posted_memes', []))
+        settings = self._load_settings()
+        self.meme_interval = settings.get('meme_interval', 60)
+        self.last_post_time = settings.get('last_post_time', 0)
+        self.blocked_words = set(settings.get('blocked_words', self.default_blocked_words))
+        self.posted_memes = set(settings.get('posted_memes', []))
+        self.meme_task_running = False
         
         # Initialize Reddit client
         self.reddit = self.setup_reddit()
         logger.info("MemesCog initialized successfully")
 
-    def load_settings(self) -> Dict[str, Any]:
-        """Load settings with error handling and validation"""
+    def _load_settings(self) -> Dict[str, Any]:
+        """Load settings from file or create with defaults"""
         try:
-            # Create data directory if it doesn't exist
             os.makedirs('data', exist_ok=True)
             
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r') as f:
-                    settings = json.load(f)
-                    if self._validate_settings(settings):
-                        return settings
-            logger.warning("Creating new settings file with defaults")
-            return self._get_default_settings()
+                    return json.load(f)
+            
+            # Create default settings
+            default_settings = {
+                'meme_interval': 60,
+                'last_post_time': 0,
+                'blocked_words': self.default_blocked_words,
+                'posted_memes': []
+            }
+            
+            # Save default settings
+            with open(self.settings_file, 'w') as f:
+                json.dump(default_settings, f, indent=4)
+            
+            return default_settings
+            
         except Exception as e:
             logger.error(f"Error loading meme settings: {e}")
-            return self._get_default_settings()
-
-    def _get_default_settings(self) -> Dict[str, Any]:
-        """Get default settings"""
-        return {
-            'meme_interval': 20,
-            'last_post_time': 0,
-            'blocked_words': [],
-            'posted_memes': []
-        }
-
-    def _validate_settings(self, settings: Dict[str, Any]) -> bool:
-        """Validate settings structure"""
-        required_fields = {'meme_interval', 'last_post_time', 'blocked_words', 'posted_memes'}
-        return all(field in settings for field in required_fields)
+            return {
+                'meme_interval': 60,
+                'last_post_time': 0,
+                'blocked_words': self.default_blocked_words,
+                'posted_memes': []
+            }
 
     def save_settings(self) -> None:
         """Save settings with error handling"""
