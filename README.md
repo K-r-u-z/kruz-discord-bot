@@ -5,35 +5,58 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ## Features
 
-### 🤖 Core Features
-- **Server Management**: Customizable server name, bot status, and embed colors
-- **Embed Management**: Comprehensive system for creating and managing embeds
-- **Automated Meme Posting**: Smart content filtering with extensive blocklist
-- **Moderation Tools**: Warning system with DM notifications (More features coming soon)
+### Welcome System
+- Customizable welcome messages with embeds
+- Auto-role assignment for new members
+- Placeholder support for dynamic content
+- Preview system for testing messages
 
-### 📝 Embed Management Commands
-- `/kruzembeds list` - Show all embed categories and their contents
-- `/kruzembeds create` - Create a new embed
-- `/kruzembeds edit` - Edit existing embeds
-- `/kruzembeds post` - Post single embed or all embeds from a category
-- `/kruzembeds delete` - Delete embeds or categories
+### Moderation
+- Warning system
+- Message purging
+- More moderation features coming soon
 
-### 🛡️ Moderation Commands
-- `/kruzwarn` - Issue warnings to users (requires kick_members permission)
-- `/rules` - Display server rules
-- `/channels` - Show server channel structure
+## Commands
 
-### ⚙️ Administrative Commands
-- `/kruzbot settings` - View current configuration
-- `/kruzbot setname` - Change server name
-- `/kruzbot setstatus` - Update bot's status
-- `/kruzbot setcolor` - Change embed color
+### Welcome Message Commands
+- `/welcome setup` - Set welcome message channel
+- `/welcome formatting` - Show available placeholders and formatting options
+- `/welcome edit` - Open modal to edit welcome message
+- `/welcome test` - Send a test welcome message
+- `/welcome toggle` - Enable/Disable welcome messages
 
-### 🎨 Meme Management
-- `/kruzmemes enable/disable` - Toggle meme posting
-- `/kruzmemes block` - Add filtered words
-- `/kruzmemes unblock` - Remove filtered words
-- `/kruzmemes` - Set posting interval
+### Auto-Role Commands
+- `/autorole show` - Display current autorole settings
+- `/autorole set @role` - Set and enable role for new members
+- `/autorole enable` - Enable autorole
+- `/autorole disable` - Disable autorole
+
+### Moderation Commands
+- `/warn @user reason` - Warn a user
+- `/purge amount [#channel]` - Delete multiple messages (1-100)
+- `/cls amount [#channel]` - Alias for purge command
+
+## Available Placeholders
+
+Welcome messages support these placeholders:
+- `{user_mention}` - Mentions the new member
+- `{user_name}` - Member's username
+- `{display_name}` - Member's display name
+- `{user_id}` - Member's ID
+- `{server_name}` - Server name
+- `{member_count}` - Current member count
+
+## Text Formatting
+
+Welcome messages support these formatting options in title and description:
+- `**text**` - Bold
+- `__text__` - Underline
+- `*text*` - Italic
+- `***text***` - Bold Italic
+- `__*text*__` - Underline Italic
+- `**__text__**` - Bold Underline
+- `***__text__***` - Bold Italic Underline
+- \`text\` - Inline Code
 
 ## Setup
 
@@ -82,6 +105,20 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - Asynchronous operations
 
 ### 📁 File Structure
+- main.py
+- config.py
+- cogs/
+  - embeds.py
+  - moderation.py
+  - memes.py
+  - settings.py
+  - welcome.py
+  - __init__.py
+- data/
+  - bot_settings.json
+  - embed_contents.json
+  - embedded_messages_ids.json
+  - meme_settings.json
 
 ## Requirements
 - Python 3.8+

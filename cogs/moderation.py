@@ -17,13 +17,13 @@ class Moderation(commands.Cog):
 
     @app_commands.command(
         name="kruzwarn",
-        description="Issue a warning to a user"
+        description="⚠️ Issue a warning to a user"
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(
-        user="The user to warn",
-        rule="The rule that was broken",
-        reason="Additional details about the warning"
+        user="👤 The user to warn",
+        rule="📜 The rule that was broken",
+        reason="📝 Additional details about the warning"
     )
     @app_commands.checks.has_permissions(kick_members=True)
     async def warn_user(
@@ -133,6 +133,95 @@ class Moderation(commands.Cog):
                 )
         except Exception as e:
             logger.error(f"Error handling warn command error: {e}")
+
+    @app_commands.command(
+        name="purge",
+        description="🗑️ Delete multiple messages from a channel"
+    )
+    @app_commands.guilds(GUILD_ID)
+    @app_commands.checks.has_permissions(manage_messages=True)
+    @app_commands.describe(
+        amount="🔢 Number of messages to delete (1-100)",
+        channel="📝 Channel to purge messages from (defaults to current channel)"
+    )
+    async def purge_messages(
+        self,
+        interaction: discord.Interaction,
+        amount: app_commands.Range[int, 1, 100],
+        channel: Optional[discord.TextChannel] = None
+    ) -> None:
+        """Purge messages from a channel"""
+        await self._handle_purge(interaction, amount, channel)
+
+    @app_commands.command(
+        name="cls",
+        description="🧹 Clear messages from a channel (defaults to 100)"
+    )
+    @app_commands.guilds(GUILD_ID)
+    @app_commands.checks.has_permissions(manage_messages=True)
+    @app_commands.describe(
+        amount="Number of messages to delete (1-100, defaults to 100)",
+        channel="Channel to purge messages from (defaults to current channel)"
+    )
+    async def cls_messages(
+        self,
+        interaction: discord.Interaction,
+        amount: Optional[app_commands.Range[int, 1, 100]] = 100,
+        channel: Optional[discord.TextChannel] = None
+    ) -> None:
+        """Alias for purge command with default amount of 100"""
+        await self._handle_purge(interaction, amount, channel)
+
+    async def _handle_purge(
+        self,
+        interaction: discord.Interaction,
+        amount: int,
+        channel: Optional[discord.TextChannel] = None
+    ) -> None:
+        """Handle message purging logic"""
+        try:
+            # Defer the response since this might take a moment
+            await interaction.response.defer(ephemeral=True)
+            
+            # Use current channel if none specified
+            target_channel = channel or interaction.channel
+            
+            # Delete messages
+            deleted = await target_channel.purge(
+                limit=amount,
+                reason=f"Purge command used by {interaction.user}"
+            )
+            
+            # Handle no messages deleted
+            if len(deleted) == 0:
+                await interaction.followup.send(
+                    "❌ No messages to delete!",
+                    ephemeral=True
+                )
+                return
+            
+            # Send confirmation
+            await interaction.followup.send(
+                f"✅ Successfully deleted {len(deleted)} messages in {target_channel.mention}",
+                ephemeral=True
+            )
+            
+            # Log the action only if messages were deleted
+            logger.info(
+                f"{interaction.user} purged {len(deleted)} messages in #{target_channel.name}"
+            )
+            
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "❌ I don't have permission to delete messages in that channel",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error purging messages: {e}")
+            await interaction.followup.send(
+                "❌ An error occurred while purging messages",
+                ephemeral=True
+            )
 
 async def setup(bot: commands.Bot) -> None:
     """Set up the Moderation cog"""

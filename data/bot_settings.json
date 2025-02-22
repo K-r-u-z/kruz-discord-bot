@@ -1,9 +1,8 @@
 {
-    "server_name": "Kruz's Community",
-    "status": {
-        "type": "watching",
-        "name": "over {server_name}",
-        "status": "online"
+    "server_name": "Your Server Name",
+    "presence": {
+        "status": "dnd",
+        "activity": "playing Minecraft"
     },
     "embed_color": "0xbc69f0"
 }

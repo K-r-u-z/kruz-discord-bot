@@ -27,11 +27,10 @@ REDDIT_USER_AGENT = get_env_var('REDDIT_USER_AGENT')
 def _get_default_settings() -> Dict[str, Any]:
     """Return default bot settings"""
     return {
-        "server_name": "Kruz's Community",
-        "status": {
-            "type": "watching",
-            "name": "over {server_name}",
-            "status": "online"
+        "server_name": "Your Server Name",
+        "presence": {
+            "status": "online",
+            "activity": "watching over {server_name}"
         },
         "embed_color": "0xbc69f0"
     }
@@ -56,8 +55,8 @@ def _load_settings_file() -> Dict[str, Any]:
 
 def load_bot_settings() -> Dict[str, Any]:
     """Load and validate bot settings"""
-    required_fields = {'server_name', 'status', 'embed_color'}
-    required_status_fields = {'type', 'name', 'status'}
+    required_fields = {'server_name', 'presence', 'embed_color'}
+    required_presence_fields = {'status', 'activity'}
     
     try:
         settings = _load_settings_file()
@@ -68,10 +67,11 @@ def load_bot_settings() -> Dict[str, Any]:
             print(f"Warning: Missing required settings: {missing}")
             return _get_default_settings()
         
-        # Validate status configuration
-        if not isinstance(settings['status'], dict) or \
-           not all(k in settings['status'] for k in required_status_fields):
-            print("Warning: Invalid status configuration")
+        # Validate presence configuration
+        presence = settings.get('presence', {})
+        if not isinstance(presence, dict) or \
+           not all(k in presence for k in required_presence_fields):
+            print("Warning: Invalid presence configuration")
             return _get_default_settings()
         
         return settings

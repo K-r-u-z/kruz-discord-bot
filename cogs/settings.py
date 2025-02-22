@@ -1,302 +1,261 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import json
 import logging
-from typing import Dict, Any, Optional
 from config import GUILD_ID, BOT_SETTINGS
-import asyncio
+import json
 import os
-from datetime import datetime
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+GUILD = discord.Object(id=GUILD_ID)
 
-class SettingsCog(commands.Cog):
-    """Cog for managing bot settings and configuration"""
-
+class Settings(commands.Cog):
+    """Cog for managing bot settings"""
+    
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.settings_file = 'data/bot_settings.json'
-        self._settings_lock = asyncio.Lock()
-        self._last_save = 0
-        self._save_delay = 5  # seconds
-        self.valid_status_types = {
-            "playing", "streaming", "listening", 
-            "watching", "competing"
-        }
-        self.valid_bot_statuses = {
-            "online", "idle", "dnd", "invisible"
-        }
+        self.settings = self._load_settings()
+        
+        # Schedule presence update after bot is ready
+        self.bot.loop.create_task(self._initial_presence_update())
 
-    async def _delayed_save(self, settings: Dict[str, Any]) -> None:
-        """Batch save operations with rate limiting"""
+    def _load_settings(self) -> Dict[str, Any]:
+        """Load settings from file"""
         try:
-            # Create data directory if it doesn't exist
-            os.makedirs('data', exist_ok=True)
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return BOT_SETTINGS
+        except Exception as e:
+            logger.error(f"Error loading settings: {e}")
+            return BOT_SETTINGS
+
+    def _save_settings(self) -> None:
+        """Save settings to file"""
+        try:
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Error saving settings: {e}")
+
+    async def _update_bot_presence(self) -> None:
+        """Update bot's presence based on current settings"""
+        try:
+            presence_info = self.settings.get("presence", {})
+            status = presence_info.get("status", "online").lower()
+            activity_text = presence_info.get("activity", "")
             
-            async with self._settings_lock:
-                current_time = datetime.now().timestamp()
-                if current_time - self._last_save < self._save_delay:
-                    return
-                
-                self._last_save = current_time
-                await self._save_to_disk(settings)
+            # Format activity text with server name
+            if activity_text:
+                activity_text = activity_text.format(
+                    server_name=self.settings.get("server_name", "Server")
+                )
+            
+            # Get presence status
+            presence_status = getattr(
+                discord.Status,
+                status,
+                discord.Status.online
+            )
+            
+            # Handle activity
+            if activity_text:
+                parts = activity_text.split(maxsplit=1)
+                if len(parts) < 2:
+                    activity = discord.Game(name=activity_text)
+                else:
+                    activity_type = parts[0].lower()
+                    activity_name = parts[1]
+                    
+                    activity_types = {
+                        "playing": discord.ActivityType.playing,
+                        "watching": discord.ActivityType.watching,
+                        "listening": discord.ActivityType.listening,
+                        "competing": discord.ActivityType.competing
+                    }
+                    
+                    if activity_type in activity_types:
+                        activity = discord.Activity(
+                            type=activity_types[activity_type],
+                            name=activity_name
+                        )
+                    else:
+                        activity = discord.Game(name=activity_text)
+            else:
+                activity = None
+            
+            await self.bot.change_presence(
+                activity=activity,
+                status=presence_status
+            )
+            logger.info(f"Updated bot presence: {activity_text} ({status})")
         except Exception as e:
-            logger.error(f"Failed to save settings: {e}")
-            raise
+            logger.error(f"Error updating bot presence: {e}")
 
-    async def _save_to_disk(self, settings: Dict[str, Any]) -> None:
-        """Save settings to disk with error handling"""
-        try:
-            async with self._settings_lock:
-                with open(self.settings_file, 'w') as f:
-                    json.dump(settings, f, indent=4)
-                logger.info("Settings saved successfully")
-        except Exception as e:
-            logger.error(f"Failed to save settings: {e}")
-            raise
+    async def _initial_presence_update(self) -> None:
+        """Update presence once bot is ready"""
+        await self.bot.wait_until_ready()
+        await self._update_bot_presence()
 
-    @app_commands.command(
-        name="kruzbot",
-        description="Manage bot settings"
-    )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.command(name="settings", description="View or modify bot settings")
+    @app_commands.guilds(GUILD)
+    @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(
-        action="Action to take",
-        value="New value to set",
-        status_type="Type of status (for status action)",
-        status_text="Status message (supports {server_name} placeholder)"
+        action="Choose what to do with settings",
+        value="New value for the setting"
     )
     @app_commands.choices(action=[
-        app_commands.Choice(name="setname", value="setname"),
-        app_commands.Choice(name="setstatus", value="setstatus"),
-        app_commands.Choice(name="setcolor", value="setcolor"),
-        app_commands.Choice(name="settings", value="settings")
+        app_commands.Choice(name="📋 Show Settings", value="show"),
+        app_commands.Choice(name="📝 Change Server Name", value="set_name"),
+        app_commands.Choice(name="🎨 Change Color", value="set_color"),
+        app_commands.Choice(name="🎮 Change Activity", value="set_activity"),
+        app_commands.Choice(name="🔵 Change Status", value="set_presence")
     ])
-    @app_commands.checks.has_permissions(administrator=True)
-    async def manage_settings(
+    @app_commands.describe(
+        action="Choose what to do with settings",
+        value="New value for the setting (activity will need text after type)"
+    )
+    async def settings_command(
         self,
         interaction: discord.Interaction,
         action: str,
-        value: Optional[str] = None,
-        status_type: Optional[str] = None,
-        status_text: Optional[str] = None
+        value: Optional[str] = None
     ) -> None:
-        """
-        Manage bot settings and configuration
-        
-        Args:
-            interaction: The interaction that triggered the command
-            action: The setting to modify
-            value: New value for the setting
-            status_type: Type of status activity
-            status_text: Status message text
-        """
+        """Manage bot settings"""
         try:
-            if action == "settings":
-                await self._show_current_settings(interaction)
-                return
-
-            if action == "setname":
-                await self._update_server_name(interaction, value)
-                return
-
-            if action == "setstatus":
-                await self._update_status(interaction, status_type, status_text, value)
-                return
-
-            if action == "setcolor":
-                await self._update_embed_color(interaction, value)
-                return
-
-        except Exception as e:
-            logger.error(f"Error in manage_settings command: {e}")
-            await interaction.response.send_message(
-                "An error occurred while updating settings.",
-                ephemeral=True
-            )
-
-    async def _show_current_settings(self, interaction: discord.Interaction) -> None:
-        """Display current bot settings"""
-        try:
-            embed = discord.Embed(
-                title="Bot Settings",
-                description="Current bot configuration",
-                color=int(BOT_SETTINGS["embed_color"], 16)
-            )
-            
-            embed.add_field(
-                name="Server Name", 
-                value=f"`{BOT_SETTINGS['server_name']}`",
-                inline=False
-            )
-            
-            status_info = BOT_SETTINGS['status']
-            embed.add_field(
-                name="Status", 
-                value=(
-                    f"Type: `{status_info['type']}`\n"
-                    f"Text: `{status_info['name']}`\n"
-                    f"Status: `{status_info['status']}`"
-                ),
-                inline=False
-            )
-            
-            embed.add_field(
-                name="Embed Color",
-                value=f"`{BOT_SETTINGS['embed_color']}`",
-                inline=False
-            )
-            
-            await interaction.response.send_message(
-                embed=embed,
-                ephemeral=True
-            )
-            
-        except Exception as e:
-            logger.error(f"Error showing settings: {e}")
-            raise
-
-    async def _update_server_name(
-        self,
-        interaction: discord.Interaction,
-        new_name: Optional[str]
-    ) -> None:
-        """Update server name setting"""
-        if not new_name:
-            await interaction.response.send_message(
-                "Please provide a new server name.",
-                ephemeral=True
-            )
-            return
-        
-        try:
-            BOT_SETTINGS["server_name"] = new_name
-            await self._delayed_save(BOT_SETTINGS)
-            
-            # Update bot status if it contains server name
-            status_name = BOT_SETTINGS["status"]["name"].format(
-                server_name=new_name
-            )
-            
-            await self.bot.change_presence(
-                activity=discord.Activity(
-                    type=getattr(
-                        discord.ActivityType,
-                        BOT_SETTINGS["status"]["type"].lower()
-                    ),
-                    name=status_name
+            if action == "show":
+                # Format current settings
+                presence_info = self.settings.get("presence", {})
+                embed = discord.Embed(
+                    title="Bot Settings",
+                    color=int(self.settings.get("embed_color", "0x2F3136"), 16)
                 )
-            )
-            
-            await interaction.response.send_message(
-                f"Server name updated to: `{new_name}`",
-                ephemeral=True
-            )
-            
-        except Exception as e:
-            logger.error(f"Error updating server name: {e}")
-            raise
-
-    async def _update_status(
-        self,
-        interaction: discord.Interaction,
-        status_type: Optional[str],
-        status_text: Optional[str],
-        value: Optional[str]
-    ) -> None:
-        """Update bot status"""
-        if not status_type or not status_text:
-            await interaction.response.send_message(
-                "Please provide both status type and text.",
-                ephemeral=True
-            )
-            return
-
-        status_type = status_type.lower()
-        if status_type not in self.valid_status_types:
-            await interaction.response.send_message(
-                f"Invalid status type. Valid types: {', '.join(self.valid_status_types)}",
-                ephemeral=True
-            )
-            return
-
-        BOT_SETTINGS["status"]["type"] = status_type
-        BOT_SETTINGS["status"]["name"] = status_text
-        if value and value.lower() in self.valid_bot_statuses:
-            BOT_SETTINGS["status"]["status"] = value.lower()
-
-        await self._delayed_save(BOT_SETTINGS)
-
-        # Update bot's status
-        status_name = status_text.format(server_name=BOT_SETTINGS["server_name"])
-        await self.bot.change_presence(
-            status=getattr(discord.Status, BOT_SETTINGS["status"]["status"]),
-            activity=discord.Activity(
-                type=getattr(discord.ActivityType, status_type),
-                name=status_name
-            )
-        )
-        await interaction.response.send_message(
-            f"Bot status updated!\nType: {status_type}\nText: {status_text}",
-            ephemeral=True
-        )
-
-    async def _update_embed_color(
-        self,
-        interaction: discord.Interaction,
-        value: Optional[str]
-    ) -> None:
-        """Update bot embed color"""
-        if not value or not value.startswith("0x"):
-            await interaction.response.send_message(
-                "Please provide a valid hex color (e.g., 0xbc69f0)",
-                ephemeral=True
-            )
-            return
-
-        try:
-            # Test if it's a valid hex color
-            int(value, 16)
-            BOT_SETTINGS["embed_color"] = value
-            await self._delayed_save(BOT_SETTINGS)
-            await interaction.response.send_message(
-                f"Embed color updated to: {value}",
-                ephemeral=True
-            )
-        except ValueError:
-            await interaction.response.send_message(
-                "Invalid hex color format. Please use format: 0xbc69f0",
-                ephemeral=True
-            )
-
-    @manage_settings.error
-    async def settings_error(
-        self,
-        interaction: discord.Interaction,
-        error: app_commands.AppCommandError
-    ) -> None:
-        """Handle errors in the settings command"""
-        try:
-            if isinstance(error, app_commands.MissingPermissions):
-                await interaction.response.send_message(
-                    "You need administrator permissions to manage bot settings.",
-                    ephemeral=True
+                embed.add_field(
+                    name="Server Name",
+                    value=self.settings.get("server_name", "Not set"),
+                    inline=False
                 )
+                embed.add_field(
+                    name="Presence",
+                    value=f"Status: {presence_info.get('status', 'online')}\n"
+                          f"Activity: {presence_info.get('activity', 'Not set')}",
+                    inline=False
+                )
+                embed.add_field(
+                    name="Embed Color",
+                    value=f"#{self.settings.get('embed_color', '2F3136')[2:]}",
+                    inline=False
+                )
+                
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            if action == "set_presence":
+                if not value:
+                    choices = ["online", "idle", "dnd", "invisible"]
+                    formatted_choices = "\n".join(f"• `{choice}`" for choice in choices)
+                    await interaction.response.send_message(
+                        f"Please choose a presence status:\n{formatted_choices}",
+                        ephemeral=True
+                    )
+                    return
+                
+                value = value.lower()
+                if value not in ["online", "idle", "dnd", "invisible"]:
+                    await interaction.response.send_message(
+                        "Invalid status! Choose: `online`, `idle`, `dnd`, or `invisible`",
+                        ephemeral=True
+                    )
+                    return
+
+            elif action == "set_activity":
+                if not value:
+                    activity_types = ["playing", "watching", "listening", "competing"]
+                    formatted_types = "\n".join(f"• `{type} <text>`" for type in activity_types)
+                    examples = [
+                        "`playing Minecraft`",
+                        "`watching over {server_name}`",
+                        "`listening to music`",
+                        "`competing in tournaments`"
+                    ]
+                    await interaction.response.send_message(
+                        f"Please provide an activity type and text:\n\n"
+                        f"**Available Types:**\n{formatted_types}\n\n"
+                        f"**Examples:**\n" + "\n".join(examples),
+                        ephemeral=True
+                    )
+                    return
+
+            if action == "set_name":
+                self.settings["server_name"] = value
+                response = f"Server name updated to: **{value}**"
+                await self._update_bot_presence()  # Update presence after name change
+
+            elif action == "set_color":
+                # Validate color format
+                if not value.startswith("0x") or len(value) != 8:
+                    await interaction.response.send_message(
+                        "Color must be in format: `0xRRGGBB`",
+                        ephemeral=True
+                    )
+                    return
+                
+                self.settings["embed_color"] = value
+                response = f"Embed color updated to: `#{value[2:]}`"
+
+            elif action == "set_activity":
+                if not value:
+                    await interaction.response.send_message(
+                        "Please provide an activity!\n"
+                        "Format: `<type> <text>`\n"
+                        "Types: `playing`, `watching`, `listening`, `competing`\n"
+                        "Example: `watching over {server_name}`",
+                        ephemeral=True
+                    )
+                    return
+
+                # Update activity text
+                if not "presence" in self.settings:
+                    self.settings["presence"] = {"status": "online", "activity": ""}
+                
+                self.settings["presence"]["activity"] = value
+                await self._update_bot_presence()
+                response = f"Bot activity updated to: **{value}**"
+
+            elif action == "set_presence":
+                valid_statuses = ["online", "idle", "dnd", "invisible"]
+                if not value or value.lower() not in valid_statuses:
+                    await interaction.response.send_message(
+                        "Please provide a valid status!\n"
+                        "Available statuses: `online`, `idle`, `dnd`, `invisible`",
+                        ephemeral=True
+                    )
+                    return
+
+                if not "presence" in self.settings:
+                    self.settings["presence"] = {"status": "online", "activity": ""}
+                
+                status = value.lower()
+                self.settings["presence"]["status"] = status
+                await self._update_bot_presence()
+                response = f"Bot presence updated to: **{status}**"
+
             else:
-                logger.error(f"Unexpected error in settings command: {error}")
-                await interaction.response.send_message(
-                    "An unexpected error occurred.",
-                    ephemeral=True
-                )
+                response = "Invalid action!"
+
+            # Save and respond
+            self._save_settings()
+            await interaction.response.send_message(response, ephemeral=True)
+
         except Exception as e:
-            logger.error(f"Error handling settings command error: {e}")
+            logger.error(f"Error in settings command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while updating settings",
+                ephemeral=True
+            )
 
 async def setup(bot: commands.Bot) -> None:
-    """Set up the Settings cog"""
-    try:
-        await bot.add_cog(SettingsCog(bot))
-        logger.info("Settings cog loaded successfully")
-    except Exception as e:
-        logger.error(f"Error loading Settings cog: {e}")
-        raise 
+    await bot.add_cog(Settings(bot))
+    logger.info("Settings cog loaded successfully") 

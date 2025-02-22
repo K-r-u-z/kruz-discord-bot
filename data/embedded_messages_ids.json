@@ -1,14 +1,5 @@
 {
-    "rules": null,
-    "channels": null,
-    "games": {
-        "lottery": null,
-        "events": null,
-        "minigames": null,
-        "fishing": null,
-        "fighting": null,
-        "farming": null,
-        "hunting": null,
-        "robbing": null
+    "test": {
+        "test1": "1342682327423123467"
     }
 }

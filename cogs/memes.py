@@ -117,18 +117,21 @@ class MemesCog(commands.Cog):
     async def before_post_meme(self):
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="kruzmemes", description="Manage meme poster settings")
+    @app_commands.command(
+        name="kruzmemes",
+        description="🎭 Manage meme poster settings"
+    )
     @app_commands.guilds(GUILD)
     @app_commands.describe(
-        action="Action to perform",
-        interval="Set the interval between memes (in minutes, default 20)",
-        keywords="Keywords to block/unblock (separate multiple with commas)"
+        action="Choose what to do",
+        interval="Set posting interval (minutes)",
+        keywords="Keywords to block/unblock (comma separated)"
     )
     @app_commands.choices(action=[
-        app_commands.Choice(name="Enable", value="enable"),
-        app_commands.Choice(name="Disable", value="disable"),
-        app_commands.Choice(name="Block Keywords", value="block"),
-        app_commands.Choice(name="Unblock Keywords", value="unblock")
+        app_commands.Choice(name="✅ Enable", value="enable"),
+        app_commands.Choice(name="❌ Disable", value="disable"),
+        app_commands.Choice(name="🚫 Block Words", value="block"),
+        app_commands.Choice(name="✨ Unblock Words", value="unblock")
     ])
     @app_commands.checks.has_permissions(administrator=True)
     async def manage_memes(

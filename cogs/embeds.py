@@ -1140,6 +1140,51 @@ class ServerCommands(commands.Cog):
             logger.error(f"Error updating channels message: {e}")
             return False
 
+    @app_commands.command(
+        name="embed",
+        description="📝 Create and manage embedded messages"
+    )
+    @app_commands.describe(
+        action="Choose what to do",
+        category="Category name for organizing embeds",
+        name="Name of the embed",
+        channel="Channel to send/edit the embed in"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="📝 Create New", value="create"),
+        app_commands.Choice(name="✏️ Edit Existing", value="edit"),
+        app_commands.Choice(name="🗑️ Delete", value="delete"),
+        app_commands.Choice(name="📋 Show List", value="list"),
+        app_commands.Choice(name="👀 Preview", value="preview")
+    ])
+    async def embed(self, interaction: discord.Interaction, action: str, category: str, name: str, channel: discord.TextChannel) -> None:
+        """Create and manage embedded messages"""
+        try:
+            if not await self._check_cooldown(interaction.user.id):
+                await interaction.response.send_message(
+                    "Please wait a few seconds before using this command again.",
+                    ephemeral=True
+                )
+                return
+
+            if action == "create":
+                await self.create_embed(interaction, category, name, "", None, None)
+            elif action == "edit":
+                await self.edit_embeds(interaction, category, name, False, None)
+            elif action == "delete":
+                await self.delete_embed_category(interaction, category, name)
+            elif action == "list":
+                await self.list_embed_categories(interaction)
+            elif action == "preview":
+                await self.get_current_content(category, name)
+
+        except Exception as e:
+            logger.error(f"Error in embed command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while managing the embed.",
+                ephemeral=True
+            )
+
 async def setup(bot: commands.Bot) -> None:
     """Set up the Commands cog"""
     try:

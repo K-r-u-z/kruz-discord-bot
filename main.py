@@ -2,9 +2,10 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
+
 
 # Configure logging
 logging.basicConfig(
@@ -17,6 +18,7 @@ class KruzBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.members = True
         
         super().__init__(
             command_prefix='!',
@@ -25,10 +27,11 @@ class KruzBot(commands.Bot):
         )
         
         self.initial_extensions: List[str] = [
-            'cogs.commands',
+            'cogs.embeds',
             'cogs.moderation',
             'cogs.memes',
-            'cogs.settings'
+            'cogs.settings',
+            'cogs.welcome'
         ]
         
         self.guild = discord.Object(id=GUILD_ID)
@@ -44,6 +47,7 @@ class KruzBot(commands.Bot):
                 self._log_error(f"Extension load error: {extension}", e)
 
         try:
+            # Sync commands with guild
             synced = await self.tree.sync(guild=self.guild)
             logger.info(f"Synced {len(synced)} commands")
         except Exception as e:
@@ -54,20 +58,45 @@ class KruzBot(commands.Bot):
         logger.info(f"Logged in as {self.user}")
         
         try:
-            # Set bot status
-            status_type = getattr(discord.ActivityType, 
-                                BOT_SETTINGS["status"]["type"].lower())
-            status_name = BOT_SETTINGS["status"]["name"].format(
-                server_name=BOT_SETTINGS["server_name"])
-            bot_status = getattr(discord.Status, 
-                               BOT_SETTINGS["status"]["status"].lower())
+            # Set bot status from settings
+            presence_info = BOT_SETTINGS.get("presence", {})
+            status_name = presence_info.get("activity", "").format(
+                server_name=BOT_SETTINGS.get("server_name")
+            )
+            
+            # Get status type
+            parts = status_name.split(maxsplit=1)
+            if len(parts) < 2:
+                activity = discord.Game(name=status_name)
+            else:
+                activity_type = parts[0].lower()
+                activity_name = parts[1]
+                
+                activity_types = {
+                    "playing": discord.ActivityType.playing,
+                    "watching": discord.ActivityType.watching,
+                    "listening": discord.ActivityType.listening,
+                    "competing": discord.ActivityType.competing
+                }
+                
+                if activity_type in activity_types:
+                    activity = discord.Activity(
+                        type=activity_types[activity_type],
+                        name=activity_name
+                    )
+                else:
+                    activity = discord.Game(name=status_name)
+            
+            # Set presence
+            presence_status = getattr(
+                discord.Status,
+                presence_info.get("status", "online").lower(),
+                discord.Status.online
+            )
             
             await self.change_presence(
-                status=bot_status,
-                activity=discord.Activity(
-                    type=status_type,
-                    name=status_name
-                )
+                status=presence_status,
+                activity=activity
             )
         except Exception as e:
             logger.error(f"Failed to set bot presence: {e}")
@@ -78,8 +107,19 @@ class KruzBot(commands.Bot):
         logger.error(error_msg)
         
         # Could also add file logging here if needed
-        # with open('error.log', 'a') as f:
-        #     f.write(f"{error_msg}\n")
+        with open('error.log', 'a', encoding='utf-8') as f:
+            f.write(f"{error_msg}\n")
+
+    @commands.command()
+    @commands.is_owner()
+    async def sync(self, ctx: commands.Context) -> None:
+        """Sync all slash commands"""
+        try:
+            await ctx.send("Syncing commands...")
+            await self.tree.sync(guild=self.guild)
+            await ctx.send("Successfully synced slash commands!")
+        except Exception as e:
+            await ctx.send(f"Failed to sync commands: {e}")
 
 async def main() -> None:
     """Main entry point for the bot"""
