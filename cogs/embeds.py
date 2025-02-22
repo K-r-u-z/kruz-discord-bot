@@ -7,7 +7,6 @@ from typing import Optional, Dict, Any, List
 import json
 import os
 import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -445,24 +444,41 @@ class ServerCommands(commands.Cog):
             if not channel:
                 return
 
-            message_id = int(self.message_ids[category])
-            try:
-                message = await channel.fetch_message(message_id)
-            except discord.NotFound:
-                # Message was deleted, remove from tracking
+            # Handle both old (string) and new (dict) message ID formats
+            message_id_data = self.message_ids[category]
+            if isinstance(message_id_data, dict):
+                # Create a list of items to avoid modification during iteration
+                items = list(message_id_data.items())
+                for name, msg_id in items:
+                    try:
+                        message = await channel.fetch_message(int(msg_id))
+                        embed = await self._create_embed(category, name)
+                        if embed:
+                            await message.edit(embed=embed)
+                    except discord.NotFound:
+                        # Message was deleted, remove from tracking
+                        if name in self.message_ids[category]:
+                            del self.message_ids[category][name]
+            else:
+                # Old format where we store a single message ID for category
+                try:
+                    message = await channel.fetch_message(int(message_id_data))
+                    # Create all embeds for the category
+                    embeds = []
+                    for name in self.embed_contents[category]:
+                        embed = await self._create_embed(category, name)
+                        if embed:
+                            embeds.append(embed)
+                    if embeds:
+                        await message.edit(embeds=embeds)
+                except discord.NotFound:
+                    # Message was deleted, remove from tracking
+                    del self.message_ids[category]
+
+            # Clean up empty categories
+            if category in self.message_ids and not self.message_ids[category]:
                 del self.message_ids[category]
                 self.save_message_ids()
-                return
-
-            # Create all embeds for the category
-            embeds = []
-            for name in self.embed_contents[category]:
-                embed = await self._create_embed(category, name)
-                if embed:
-                    embeds.append(embed)
-
-            if embeds:
-                await message.edit(embeds=embeds)
 
         except Exception as e:
             logger.error(f"Error updating category message: {e}")

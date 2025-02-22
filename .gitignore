@@ -1,30 +1,20 @@
-# Environment variables
-.env
-
-# Python
+# Python cache files
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# IDE specific files
-.idea/
+# Virtual environment
+venv/
+env/
+.env
+
+# IDE settings
 .vscode/
-*.swp
-*.swo
+.idea/
+
+# Bot data files
+data/*.json
+!data/*.example.json
+
+# Logs
+*.log 
