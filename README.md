@@ -97,11 +97,11 @@ Example Usage:
 
 ### Meme Commands
 - `/kruzmemes` - Manage meme poster settings
-  - `✅ Enable` - Enable meme posting
-  - `❌ Disable` - Disable meme posting
+  - `🔄 Toggle System` - Enable/Disable meme posting
   - `🚫 Block Words` - Add words to block list
   - `✨ Unblock Words` - Remove words from block list
-
+  - `📋 List Blocked Words` - List all blocked words
+  
 ## Available Placeholders
 
 Embeds support these placeholders:
