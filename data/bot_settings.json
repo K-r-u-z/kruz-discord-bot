@@ -1,8 +1,8 @@
 {
     "server_name": "Your Server Name",
     "presence": {
-        "status": "dnd",
-        "activity": "playing Minecraft"
+        "status": "online",
+        "activity": "watching over {server_name}"
     },
     "embed_color": "0xbc69f0"
 }
