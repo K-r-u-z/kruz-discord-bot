@@ -65,32 +65,30 @@ class MemesCog(commands.Cog):
         ]
         
         # Load settings
-        settings = self._load_settings()
-        self.meme_interval = settings.get('meme_interval', 60)
-        self.last_post_time = settings.get('last_post_time', 0)
-        self.blocked_words = set(settings.get('blocked_words', self.default_blocked_words))
-        self.posted_memes = set(settings.get('posted_memes', []))
+        self.settings = self.load_settings()
+        self.meme_interval = self.settings.get('meme_interval', 60)
+        self.last_post_time = self.settings.get('last_post_time', 0)
+        self.blocked_words = set(self.settings.get('blocked_words', self.default_blocked_words))
+        self.posted_memes = set(self.settings.get('posted_memes', []))
         self.meme_task_running = False
         
         # Initialize Reddit client
         self.reddit = self.setup_reddit()
         logger.info("MemesCog initialized successfully")
 
-    def _load_settings(self) -> Dict[str, Any]:
-        """Load settings from file or create with defaults"""
+    def load_settings(self) -> Dict[str, Any]:
+        """Load meme settings from file"""
         try:
-            os.makedirs('data', exist_ok=True)
-            
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r') as f:
                     return json.load(f)
             
-            # Create default settings
+            # Create default settings if file doesn't exist
             default_settings = {
-                'meme_interval': 60,
-                'last_post_time': 0,
-                'blocked_words': self.default_blocked_words,
-                'posted_memes': []
+                "meme_interval": 60,
+                "last_post_time": 0,
+                "blocked_words": self.default_blocked_words,  # Use default blocked words
+                "posted_memes": []
             }
             
             # Save default settings
@@ -102,10 +100,10 @@ class MemesCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error loading meme settings: {e}")
             return {
-                'meme_interval': 60,
-                'last_post_time': 0,
-                'blocked_words': self.default_blocked_words,
-                'posted_memes': []
+                "meme_interval": 60,
+                "last_post_time": 0,
+                "blocked_words": self.default_blocked_words,  # Use default blocked words here too
+                "posted_memes": []
             }
 
     def save_settings(self) -> None:
@@ -168,7 +166,8 @@ class MemesCog(commands.Cog):
         app_commands.Choice(name="✅ Enable", value="enable"),
         app_commands.Choice(name="❌ Disable", value="disable"),
         app_commands.Choice(name="🚫 Block Words", value="block"),
-        app_commands.Choice(name="✨ Unblock Words", value="unblock")
+        app_commands.Choice(name="✨ Unblock Words", value="unblock"),
+        app_commands.Choice(name="📋 List Blocked", value="list")
     ])
     @app_commands.checks.has_permissions(administrator=True)
     async def manage_memes(
@@ -179,7 +178,34 @@ class MemesCog(commands.Cog):
         keywords: Optional[str] = None
     ):
         try:
-            if action == "disable":
+            if action == "list":
+                # Create embed to show blocked words
+                embed = discord.Embed(
+                    title="🚫 Blocked Words",
+                    description="Currently blocked words for meme filtering:",
+                    color=EMBED_COLOR
+                )
+                
+                # Sort blocked words alphabetically
+                sorted_words = sorted(self.blocked_words)
+                
+                # Split into chunks of 15 words per field
+                chunk_size = 15
+                for i in range(0, len(sorted_words), chunk_size):
+                    chunk = sorted_words[i:i + chunk_size]
+                    field_name = f"Words {i+1}-{min(i+chunk_size, len(sorted_words))}"
+                    field_value = "• " + "\n• ".join(chunk)
+                    embed.add_field(
+                        name=field_name,
+                        value=field_value,
+                        inline=False
+                    )
+                
+                embed.set_footer(text=f"Total blocked words: {len(self.blocked_words)}")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            elif action == "disable":
                 # Stop the task
                 self.post_meme.cancel()
                 self.meme_task_running = False
