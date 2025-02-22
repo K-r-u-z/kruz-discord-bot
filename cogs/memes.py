@@ -37,7 +37,7 @@ class MemesCog(commands.Cog):
             # Violence
             'gore', 'death', 'kill', 'murder', 'blood', 'suicide', 'dead', 'assault',
             'abuse', 'torture', 'beating', 'gun', 'shooting', 'stab', 'execution',
-            'bomb', 'terrorzist', 'hostage',
+            'bomb', 'terrorist', 'hostage',
 
             # Hate speech/offensive
             'racist', 'racism', 'nazi', 'hate', 'slur', 'offensive', 'homophobic',

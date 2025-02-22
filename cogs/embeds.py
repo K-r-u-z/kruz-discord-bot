@@ -253,9 +253,13 @@ class ServerCommands(commands.Cog):
                 embed = await self._create_embed(category, name)
                 if embed:
                     message = await channel.send(embed=embed)
-                    # Store message ID for individual embed
+                    # Convert old string format to dict format if needed
+                    if category in self.message_ids and isinstance(self.message_ids[category], str):
+                        self.message_ids[category] = {}
+                    # Initialize category dict if it doesn't exist
                     if category not in self.message_ids:
                         self.message_ids[category] = {}
+                    # Store message ID for individual embed
                     self.message_ids[category][name] = str(message.id)
                     self.save_message_ids()
             else:
