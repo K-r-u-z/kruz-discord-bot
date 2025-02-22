@@ -37,7 +37,7 @@ class MemesCog(commands.Cog):
             # Violence
             'gore', 'death', 'kill', 'murder', 'blood', 'suicide', 'dead', 'assault',
             'abuse', 'torture', 'beating', 'gun', 'shooting', 'stab', 'execution',
-            'bomb', 'terrorist', 'hostage',
+            'bomb', 'terrorzist', 'hostage',
 
             # Hate speech/offensive
             'racist', 'racism', 'nazi', 'hate', 'slur', 'offensive', 'homophobic',
@@ -163,8 +163,7 @@ class MemesCog(commands.Cog):
         keywords="Keywords to block/unblock (comma separated)"
     )
     @app_commands.choices(action=[
-        app_commands.Choice(name="✅ Enable", value="enable"),
-        app_commands.Choice(name="❌ Disable", value="disable"),
+        app_commands.Choice(name="🔄 Toggle", value="toggle"),
         app_commands.Choice(name="🚫 Block Words", value="block"),
         app_commands.Choice(name="✨ Unblock Words", value="unblock"),
         app_commands.Choice(name="📋 List Blocked", value="list")
@@ -178,7 +177,34 @@ class MemesCog(commands.Cog):
         keywords: Optional[str] = None
     ):
         try:
-            if action == "list":
+            if action == "toggle":
+                # Toggle meme posting
+                if self.meme_task_running:
+                    self.post_meme.cancel()
+                    self.meme_task_running = False
+                    self.is_posting = False
+                    await interaction.response.send_message("Meme poster has been disabled!", ephemeral=True)
+                else:
+                    # Update interval if provided
+                    if interval is not None:
+                        if interval < 1:
+                            await interaction.response.send_message("Interval must be at least 1 minute!", ephemeral=True)
+                            return
+                        self.meme_interval = interval
+                        self.settings['meme_interval'] = interval
+                        self.save_settings()
+
+                    # Start the task
+                    self.post_meme.change_interval(minutes=self.meme_interval)
+                    self.post_meme.start()
+                    self.meme_task_running = True
+                    await interaction.response.send_message(
+                        f"Meme poster has been enabled! Posting every {self.meme_interval} minutes.", 
+                        ephemeral=True
+                    )
+                return
+
+            elif action == "list":
                 # Create embed to show blocked words
                 embed = discord.Embed(
                     title="🚫 Blocked Words",
@@ -204,34 +230,6 @@ class MemesCog(commands.Cog):
                 embed.set_footer(text=f"Total blocked words: {len(self.blocked_words)}")
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
-
-            elif action == "disable":
-                # Stop the task
-                self.post_meme.cancel()
-                self.meme_task_running = False
-                self.is_posting = False
-                print("\033[91m" + "Kruz Memes has been disabled!" + "\033[0m")  # Red text
-                await interaction.response.send_message("Meme poster has been disabled!", ephemeral=True)
-                
-            elif action == "enable":
-                # Update interval if provided
-                if interval is not None:
-                    if interval < 1:
-                        await interaction.response.send_message("Interval must be at least 1 minute!", ephemeral=True)
-                        return
-                    self.meme_interval = interval
-                    self.settings['meme_interval'] = interval
-                    self.save_settings()
-
-                # Start the task
-                self.post_meme.change_interval(minutes=self.meme_interval)
-                self.post_meme.start()
-                self.meme_task_running = True
-                print("\033[92m" + f"Kruz Memes has been enabled! Posting every {self.meme_interval} minutes." + "\033[0m")  # Green text
-                await interaction.response.send_message(
-                    f"Meme poster has been enabled! Posting every {self.meme_interval} minutes.", 
-                    ephemeral=True
-                )
 
             elif action == "block":
                 if not keywords:

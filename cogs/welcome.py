@@ -179,7 +179,7 @@ class Welcome(commands.Cog):
         app_commands.Choice(name="📝 Edit Message", value="edit"),
         app_commands.Choice(name="⚙️ Setup Channel", value="setup"),
         app_commands.Choice(name="📋 Show Format", value="formatting"),
-        app_commands.Choice(name="🔄 Toggle System", value="toggle")
+        app_commands.Choice(name="🔄 Toggle", value="toggle")
     ])
     async def welcome_settings(
         self,
@@ -334,8 +334,7 @@ class Welcome(commands.Cog):
     @app_commands.choices(action=[
         app_commands.Choice(name="👀 Show Settings", value="show"),
         app_commands.Choice(name="✨ Set Role", value="set"),
-        app_commands.Choice(name="✅ Enable", value="enable"),
-        app_commands.Choice(name="❌ Disable", value="disable")
+        app_commands.Choice(name="🔄 Toggle", value="toggle")
     ])
     async def autorole_settings(
         self,
@@ -369,27 +368,22 @@ class Welcome(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
-            if action == "enable":
-                if self.welcome_config["autorole"].get("enabled", False):
-                    await interaction.response.send_message("Autorole is already enabled!", ephemeral=True)
-                    return
-                if not self.welcome_config["autorole"]["role_id"]:
+            if action == "toggle":
+                current_state = self.welcome_config["autorole"].get("enabled", False)
+                if not self.welcome_config["autorole"]["role_id"] and not current_state:
                     await interaction.response.send_message(
                         "Please set a role first using `/autorole set @role`",
                         ephemeral=True
                     )
                     return
-                self.welcome_config["autorole"]["enabled"] = True
-                response = "Autorole enabled!"
+                    
+                self.welcome_config["autorole"]["enabled"] = not current_state
+                new_state = "enabled" if not current_state else "disabled"
+                self._save_settings()
+                await interaction.response.send_message(f"Autorole {new_state}!", ephemeral=True)
+                return
 
-            elif action == "disable":
-                if not self.welcome_config["autorole"].get("enabled", False):
-                    await interaction.response.send_message("Autorole is already disabled!", ephemeral=True)
-                    return
-                self.welcome_config["autorole"]["enabled"] = False
-                response = "Autorole disabled!"
-
-            elif action == "set":
+            if action == "set":
                 if not role:
                     await interaction.response.send_message(
                         "Please specify a role!",

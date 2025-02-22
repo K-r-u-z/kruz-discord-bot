@@ -34,18 +34,17 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### Welcome Message Commands
 - `/welcome` - Configure welcome message settings
+  - `⚙️ Setup Channel` - Set welcome message channel
+  - `🔄 Toggle` - Enable/Disable welcome messages
   - `👋 Test Welcome` - Send a test welcome message (also test the autorole feature if enabled)
   - `📝 Edit Message` - Open modal to edit welcome message
-  - `⚙️ Setup Channel` - Set welcome message channel
   - `📋 Show Format` - Show available placeholders and formatting options
-  - `🔄 Toggle System` - Enable/Disable welcome messages
 
 ### Auto-Role Commands
 - `/autorole` - Configure automatic role assignment
+  - `🔄 Toggle` - Enable/Disable autorole
   - `👀 Show Settings` - Display current autorole settings
   - `✨ Set Role` - Set role for new members
-  - `✅ Enable` - Enable autorole
-  - `❌ Disable` - Disable autorole
 
 ### Moderation Commands
 - `/kruzwarn` - ⚠️ Issue a warning to a user
@@ -81,23 +80,32 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 Example Usage:
 ```
-# Create/Edit an embed
-/kruzembeds edit rules welcome
-/kruzembeds edit announcements event1
+# Creating and Editing Embeds
+/kruzembeds edit rules welcome      # Create/edit a welcome embed in rules category
+/kruzembeds edit news announcement  # Create/edit an announcement in news category
 
-# Post embeds
-/kruzembeds post rules welcome    # Post single embed
-/kruzembeds post rules           # Post entire category
+# Posting Embeds
+/kruzembeds post rules welcome      # Post a single embed
+/kruzembeds post rules             # Post all embeds in category
+/kruzembeds post rules #channel    # Post to specific channel
 
-# Manage embeds
-/kruzembeds list rules          # List embeds in category
-/kruzembeds delete rules welcome # Delete specific embed
-/kruzembeds refresh             # Update all tracked embeds
+# Managing Embeds
+/kruzembeds list                   # List all embeds
+/kruzembeds list rules            # List embeds in category
+/kruzembeds delete rules welcome  # Delete specific embed
+/kruzembeds delete rules         # Delete entire category
+/kruzembeds refresh              # Update all tracked embeds
+
+# Tips:
+- Categories help organize related embeds (rules, news, info, etc.)
+- Embeds auto-update when edited
+- Use descriptive names for easy management
+- Preview before posting with list command
 ```
 
 ### Meme Commands
 - `/kruzmemes` - Manage meme poster settings
-  - `🔄 Toggle System` - Enable/Disable meme posting
+  - `🔄 Toggle` - Enable/Disable meme posting
   - `🚫 Block Words` - Add words to block list
   - `✨ Unblock Words` - Remove words from block list
   - `📋 List Blocked Words` - List all blocked words
