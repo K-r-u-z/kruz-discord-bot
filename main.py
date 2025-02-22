@@ -6,13 +6,71 @@ from typing import List
 from datetime import datetime
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
 
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Initialize logger first
 logger = logging.getLogger(__name__)
+
+# Custom formatter for cleaner logs
+class CustomFormatter(logging.Formatter):
+    """Custom formatter that uses colors and better formatting"""
+    
+    # Colors and styles
+    grey = "\x1b[38;1m"
+    blue = "\x1b[36;1m"
+    yellow = "\x1b[33;1m"
+    red = "\x1b[31;1m"
+    bold_red = "\x1b[31;1m"
+    reset = "\x1b[0m"
+
+    # Format for different log levels
+    FORMATS = {
+        logging.DEBUG: grey + "[DEBUG] %(message)s" + reset,
+        logging.INFO: blue + "[INFO] %(message)s" + reset,
+        logging.WARNING: yellow + "[WARNING] %(message)s" + reset,
+        logging.ERROR: red + "[ERROR] %(message)s" + reset,
+        logging.CRITICAL: bold_red + "[CRITICAL] %(message)s" + reset
+    }
+
+    def format(self, record):
+        # Add timestamp in a cleaner format
+        record.timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Clean up the module name
+        if "discord." in record.name:
+            record.name = record.name.replace("discord.", "")
+        elif "cogs." in record.name:
+            record.name = record.name.replace("cogs.", "")
+        
+        # Get the format for this log level
+        log_fmt = self.FORMATS.get(record.levelno)
+        
+        # Create a base formatter with our format
+        formatter = logging.Formatter(
+            f"%(timestamp)s {self.grey}%(name)s:{self.reset} {log_fmt}"
+        )
+        
+        return formatter.format(record)
+
+def setup_logging():
+    """Set up logging configuration"""
+    # Create handler
+    handler = logging.StreamHandler()
+    handler.setFormatter(CustomFormatter())
+    
+    # Configure root logger
+    logging.root.setLevel(logging.INFO)
+    logging.root.addHandler(handler)
+    
+    # Remove any existing handlers from the discord logger
+    discord_logger = logging.getLogger("discord")
+    discord_logger.setLevel(logging.INFO)
+    discord_logger.handlers = []
+    discord_logger.addHandler(handler)
+
+    # Suppress "voice will NOT be supported" warning
+    logging.getLogger("discord.client").setLevel(logging.ERROR)
+
+# Set up logging before anything else
+setup_logging()
 
 class KruzBot(commands.Bot):
     def __init__(self) -> None:
@@ -121,47 +179,19 @@ class KruzBot(commands.Bot):
         except Exception as e:
             await ctx.send(f"Failed to sync commands: {e}")
 
-async def main() -> None:
-    """Main entry point for the bot"""
-    bot = KruzBot()
-    
+async def main():
+    """Main entry point"""
     try:
-        async with bot:
-            await bot.start(TOKEN)
-    except KeyboardInterrupt:
-        logger.info("Shutting down gracefully...")
-        await shutdown(bot)
-    except discord.LoginFailure:
-        logger.error("Failed to login. Please check your Discord token.")
+        bot = KruzBot()
+        await bot.start(TOKEN)
     except Exception as e:
         logger.error(f"Fatal error occurred: {e}")
-    finally:
-        if not bot.is_closed():
-            await shutdown(bot)
-
-async def shutdown(bot: KruzBot) -> None:
-    """Clean shutdown of the bot"""
-    logger.info("Initiating shutdown sequence...")
-    
-    try:
-        # Cancel all tasks
-        tasks = [t for t in asyncio.all_tasks() 
-                if t is not asyncio.current_task()]
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Close bot connection
-        await bot.close()
-        logger.info("Bot shutdown complete")
-        
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+        raise e
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot terminated by keyboard interrupt")
+        logger.info("Bot shutdown by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")

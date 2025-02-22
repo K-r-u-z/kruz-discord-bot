@@ -11,6 +11,20 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - Placeholder support for dynamic content
 - Preview system for testing messages
 
+### Automatic Memes
+- Automated meme posting system
+- Content filtering and word blocking
+- Customizable posting settings
+- Support for multiple subreddits
+
+### Embed System
+- Create and manage embedded messages
+- Automatic embed updates when content changes (Tracks and updates existing embeds)
+- Organize embeds by categories
+- Multi-line footer support
+- Posts to current channel by default
+- Clean preview system for embed contents
+
 ### Moderation
 - Warning system
 - Message purging
@@ -50,13 +64,36 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
   - `🎮 Change Activity` - Set bot's activity
   - `🔵 Change Status` - Set bot's online status
 
-### Embed Commands
-- `/embed` - Create and manage embedded messages
-  - `📝 Create New` - Create a new embed
-  - `✏️ Edit Existing` - Edit an existing embed
-  - `🗑️ Delete` - Delete an embed
-  - `📋 Show List` - List all embeds
-  - `👀 Preview` - Preview an embed
+### Embed Management
+- `/kruzembeds` - Create and manage embedded messages
+  - `📝 Create/Edit` - Create or edit an embed
+    - Specify category and name
+    - Set title (optional)
+    - Add content
+    - Add footer with support for multiple lines
+  - `🗑️ Delete` - Delete an embed or category
+  - `📋 List All` - Show all embeds or embeds in a category
+  - `📤 Post` - Post embed(s) to the current channel
+    - Post single embed or entire category
+    - Auto-updates when changes are made
+  - `🔄 Refresh All` - Refresh all tracked embeds
+
+
+Example Usage:
+```
+# Create/Edit an embed
+/kruzembeds edit rules welcome
+/kruzembeds edit announcements event1
+
+# Post embeds
+/kruzembeds post rules welcome    # Post single embed
+/kruzembeds post rules           # Post entire category
+
+# Manage embeds
+/kruzembeds list rules          # List embeds in category
+/kruzembeds delete rules welcome # Delete specific embed
+/kruzembeds refresh             # Update all tracked embeds
+```
 
 ### Meme Commands
 - `/kruzmemes` - Manage meme poster settings
@@ -67,7 +104,7 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ## Available Placeholders
 
-Welcome messages support these placeholders:
+Embeds support these placeholders:
 - `{user_mention}` - Mentions the new member
 - `{user_name}` - Member's username
 - `{display_name}` - Member's display name
@@ -77,7 +114,7 @@ Welcome messages support these placeholders:
 
 ## Text Formatting
 
-Welcome messages support these formatting options in title and description:
+Embeds support these formatting options in title and description:
 - `**text**` - **Bold**
 - `__text__` - __Underline__
 - `*text*` - *Italic*
