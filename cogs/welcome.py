@@ -291,26 +291,20 @@ class Welcome(commands.Cog):
         """Format welcome message with placeholders"""
         config = self.welcome_config.get("message", {})
         
-        # Base format dictionary
+        # Base format dictionary with all placeholders
         format_dict = {
             "server_name": member.guild.name,
             "user_name": str(member),
             "display_name": member.display_name,
             "user_id": member.id,
-            "member_count": member.guild.member_count
+            "member_count": member.guild.member_count,
+            "user_mention": member.mention  # Use proper mention format
         }
 
-        # Special handling for mentions in title
-        title_dict = format_dict.copy()
-        title_dict["user_mention"] = member.display_name
-
-        # Normal format dict for description and footer
-        format_dict["user_mention"] = member.mention
-
         return {
-            "title": config.get("title", "Welcome!").format(**title_dict),
+            "title": config.get("title", "Welcome!").format(**format_dict),
             "description": config.get("description", "Welcome to the server!").format(**format_dict),
-            "footer": config.get("footer", "").format(**format_dict)  # No formatting handling needed
+            "footer": config.get("footer", "").format(**format_dict)
         }
 
     @commands.Cog.listener()
