@@ -18,8 +18,6 @@
             "uplay",
             "battlenet"
         ],
-        "notify_roles": [
-            "1342634908895678557"
-        ]
+        "notify_roles": []
     }
 }

@@ -65,7 +65,9 @@ class KruzBot(commands.Bot):
         super().__init__(
             command_prefix='!',
             intents=intents,
-            help_command=None  # Disable default help command
+            help_command=None,  # Disable default help command
+            reconnect=True,  # Enable auto-reconnect
+            max_messages=10000  # Increase message cache to help with latency
         )
         
         self.initial_extensions: List[str] = [
@@ -75,11 +77,12 @@ class KruzBot(commands.Bot):
             'cogs.settings',
             'cogs.welcome',
             'cogs.freegames'
-            
         ]
         
         self.guild = discord.Object(id=GUILD_ID)
-        
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 5
+
     async def setup_hook(self) -> None:
         """Initialize bot extensions and sync commands"""
         for extension in self.initial_extensions:
@@ -96,6 +99,39 @@ class KruzBot(commands.Bot):
             logger.info(f"Synced {len(synced)} commands")
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
+
+    async def on_error(self, event_method: str, *args, **kwargs) -> None:
+        """Handle any uncaught errors"""
+        logger.error(f"Uncaught error in {event_method}: {args} {kwargs}")
+        if self.reconnect_attempts < self.max_reconnect_attempts:
+            self.reconnect_attempts += 1
+            try:
+                await self.close()
+                await self.start(TOKEN)
+            except Exception as e:
+                logger.error(f"Failed to reconnect: {e}")
+        else:
+            logger.critical("Max reconnection attempts reached")
+
+    async def on_socket_raw_receive(self, msg):
+        """Monitor websocket latency"""
+        if self.ws:
+            latency = self.ws.latency
+            if latency > 5:  # If latency is over 5 seconds
+                logger.warning(f"High websocket latency detected: {latency:.2f}s")
+                if latency > 15:  # If latency is over 15 seconds
+                    logger.error("Extreme latency detected, attempting reconnect")
+                    await self.close()
+                    await self.start(TOKEN)
+
+    async def on_resumed(self):
+        """Handle successful reconnection"""
+        logger.info("Session resumed successfully")
+        self.reconnect_attempts = 0
+
+    async def on_disconnect(self):
+        """Handle disconnection"""
+        logger.warning("Bot disconnected from Discord")
     
     async def on_ready(self) -> None:
         """Handle bot ready event"""
@@ -165,11 +201,29 @@ class KruzBot(commands.Bot):
         except Exception as e:
             await ctx.send(f"Failed to sync commands: {e}")
 
+    async def close(self) -> None:
+        """Cleanup and close the bot properly"""
+        try:
+            # Close any active sessions in cogs
+            for cog in self.cogs.values():
+                if hasattr(cog, 'reddit'):
+                    await cog.reddit.close()
+                if hasattr(cog, 'session'):
+                    await cog.session.close()
+            
+            # Call parent close
+            await super().close()
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+
 async def main():
     """Main entry point"""
     try:
-        bot = KruzBot()
-        await bot.start(TOKEN)
+        async with KruzBot() as bot:
+            await bot.start(TOKEN)
+    except KeyboardInterrupt:
+        logger.info("Bot shutdown by user")
     except Exception as e:
         logger.error(f"Fatal error occurred: {e}")
         raise e
