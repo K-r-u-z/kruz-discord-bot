@@ -6,10 +6,10 @@ from typing import List
 from datetime import datetime
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
 
-# Initialize logger first
-logger = logging.getLogger(__name__)
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-# Custom formatter for cleaner logs
 class CustomFormatter(logging.Formatter):
     """Custom formatter that uses colors and better formatting"""
     
@@ -50,27 +50,11 @@ class CustomFormatter(logging.Formatter):
         
         return formatter.format(record)
 
-def setup_logging():
-    """Set up logging configuration"""
-    # Create handler
-    handler = logging.StreamHandler()
-    handler.setFormatter(CustomFormatter())
-    
-    # Configure root logger
-    logging.root.setLevel(logging.INFO)
-    logging.root.addHandler(handler)
-    
-    # Remove any existing handlers from the discord logger
-    discord_logger = logging.getLogger("discord")
-    discord_logger.setLevel(logging.INFO)
-    discord_logger.handlers = []
-    discord_logger.addHandler(handler)
-
-    # Suppress "voice will NOT be supported" warning
-    logging.getLogger("discord.client").setLevel(logging.ERROR)
-
-# Set up logging before anything else
-setup_logging()
+handler = logging.StreamHandler()
+handler.setFormatter(CustomFormatter())
+# Set a higher log level to filter out most discord.py internal messages
+logging.getLogger('discord').setLevel(logging.WARNING)
+logger.addHandler(handler)
 
 class KruzBot(commands.Bot):
     def __init__(self) -> None:
@@ -89,7 +73,9 @@ class KruzBot(commands.Bot):
             'cogs.moderation',
             'cogs.memes',
             'cogs.settings',
-            'cogs.welcome'
+            'cogs.welcome',
+            'cogs.freegames'
+            
         ]
         
         self.guild = discord.Object(id=GUILD_ID)

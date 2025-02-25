@@ -10,6 +10,186 @@ from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 GUILD = discord.Object(id=GUILD_ID)
 
+class BaseSettingsView(discord.ui.View):
+    def __init__(self, cog: 'Settings', previous_view=None):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.previous_view = previous_view
+
+    @discord.ui.button(label="◀️ Back", style=discord.ButtonStyle.gray, row=4)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.previous_view:
+            # Create settings embed
+            presence_info = self.cog.settings.get("presence", {})
+            embed = discord.Embed(
+                title="Bot Settings",
+                description="Current settings:",
+                color=self.cog.embed_color
+            )
+            embed.add_field(
+                name="Server Name",
+                value=self.cog.settings.get("server_name", "Not set"),
+                inline=False
+            )
+            embed.add_field(
+                name="Presence",
+                value=f"Status: {presence_info.get('status', 'online')}\n"
+                      f"Activity: {presence_info.get('activity', 'Not set')}",
+                inline=False
+            )
+            embed.add_field(
+                name="Embed Color",
+                value=f"#{self.cog.settings.get('embed_color', '2F3136')[2:]}",
+                inline=False
+            )
+            
+            await interaction.response.edit_message(
+                embed=embed,
+                view=self.previous_view
+            )
+
+class SettingsView(BaseSettingsView):
+    def __init__(self, cog: 'Settings'):
+        super().__init__(cog, None)
+        self.remove_item(self.back_button)
+
+    @discord.ui.button(label="📝 Change Server Name", style=discord.ButtonStyle.primary)
+    async def change_name(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = ServerNameModal(self.cog)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🎨 Change Color", style=discord.ButtonStyle.primary)
+    async def change_color(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = ColorModal(self.cog)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🎮 Change Activity", style=discord.ButtonStyle.primary)
+    async def change_activity(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = ActivityModal(self.cog)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🔵 Change Status", style=discord.ButtonStyle.primary)
+    async def change_status(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = StatusView(self.cog, self)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Change Status",
+                description="Select a status:",
+                color=self.cog.embed_color
+            ),
+            view=view
+        )
+
+class StatusView(BaseSettingsView):
+    def __init__(self, cog: 'Settings', previous_view):
+        super().__init__(cog, previous_view)
+        self.add_status_buttons()
+
+    def add_status_buttons(self):
+        statuses = [
+            ("🟢 Online", "online"),
+            ("🟡 Idle", "idle"),
+            ("🔴 Do Not Disturb", "dnd"),
+            ("⚫ Invisible", "invisible")
+        ]
+        
+        for label, status in statuses:
+            button = discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"status_{status}"
+            )
+            button.callback = self.make_callback(status)
+            self.add_item(button)
+
+    def make_callback(self, status: str):
+        async def callback(interaction: discord.Interaction):
+            if not "presence" in self.cog.settings:
+                self.cog.settings["presence"] = {"status": "online", "activity": ""}
+            
+            self.cog.settings["presence"]["status"] = status
+            self.cog._save_settings()
+            await self.cog._update_bot_presence()
+            
+            await interaction.response.send_message(
+                f"Bot status updated to: **{status}**",
+                ephemeral=True
+            )
+        return callback
+
+class ServerNameModal(discord.ui.Modal, title="Change Server Name"):
+    name = discord.ui.TextInput(
+        label="Server Name",
+        placeholder="Enter new server name",
+        required=True
+    )
+
+    def __init__(self, cog: 'Settings'):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.cog.settings["server_name"] = self.name.value
+        self.cog._save_settings()
+        await self.cog._update_bot_presence()
+        
+        await interaction.response.send_message(
+            f"Server name updated to: **{self.name.value}**",
+            ephemeral=True
+        )
+
+class ColorModal(discord.ui.Modal, title="Change Embed Color"):
+    color = discord.ui.TextInput(
+        label="Color (hex)",
+        placeholder="Enter color in format: 0xRRGGBB",
+        required=True
+    )
+
+    def __init__(self, cog: 'Settings'):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not self.color.value.startswith("0x") or len(self.color.value) != 8:
+            await interaction.response.send_message(
+                "Color must be in format: `0xRRGGBB`",
+                ephemeral=True
+            )
+            return
+        
+        self.cog.settings["embed_color"] = self.color.value
+        self.cog.embed_color = int(self.color.value, 16)
+        self.cog._save_settings()
+        
+        await interaction.response.send_message(
+            f"Embed color updated to: `#{self.color.value[2:]}`",
+            ephemeral=True
+        )
+
+class ActivityModal(discord.ui.Modal, title="Change Bot Activity"):
+    activity = discord.ui.TextInput(
+        label="Activity",
+        placeholder="Type: playing/watching/listening/competing + text",
+        required=True
+    )
+
+    def __init__(self, cog: 'Settings'):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not "presence" in self.cog.settings:
+            self.cog.settings["presence"] = {"status": "online", "activity": ""}
+        
+        self.cog.settings["presence"]["activity"] = self.activity.value
+        self.cog._save_settings()
+        await self.cog._update_bot_presence()
+        
+        await interaction.response.send_message(
+            f"Bot activity updated to: **{self.activity.value}**",
+            ephemeral=True
+        )
+
 class Settings(commands.Cog):
     """Cog for managing bot settings"""
     
@@ -17,6 +197,7 @@ class Settings(commands.Cog):
         self.bot = bot
         self.settings_file = 'data/bot_settings.json'
         self.settings = self._load_settings()
+        self.embed_color = int(self.settings.get("embed_color", "0x2F3136"), 16)
         
         # Schedule presence update after bot is ready
         self.bot.loop.create_task(self._initial_presence_update())
@@ -99,163 +280,40 @@ class Settings(commands.Cog):
         await self.bot.wait_until_ready()
         await self._update_bot_presence()
 
-    @app_commands.command(name="settings", description="View or modify bot settings")
+    @app_commands.command(
+        name="settings",
+        description="⚙️ Configure bot settings"
+    )
     @app_commands.guilds(GUILD)
     @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(
-        action="Choose what to do with settings",
-        value="New value for the setting"
-    )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="📋 Show Settings", value="show"),
-        app_commands.Choice(name="📝 Change Server Name", value="set_name"),
-        app_commands.Choice(name="🎨 Change Color", value="set_color"),
-        app_commands.Choice(name="🎮 Change Activity", value="set_activity"),
-        app_commands.Choice(name="🔵 Change Status", value="set_presence")
-    ])
-    @app_commands.describe(
-        action="Choose what to do with settings",
-        value="New value for the setting (activity will need text after type)"
-    )
-    async def settings_command(
-        self,
-        interaction: discord.Interaction,
-        action: str,
-        value: Optional[str] = None
-    ) -> None:
+    async def settings_command(self, interaction: discord.Interaction):
         """Manage bot settings"""
-        try:
-            if action == "show":
-                # Format current settings
-                presence_info = self.settings.get("presence", {})
-                embed = discord.Embed(
-                    title="Bot Settings",
-                    color=int(self.settings.get("embed_color", "0x2F3136"), 16)
-                )
-                embed.add_field(
-                    name="Server Name",
-                    value=self.settings.get("server_name", "Not set"),
-                    inline=False
-                )
-                embed.add_field(
-                    name="Presence",
-                    value=f"Status: {presence_info.get('status', 'online')}\n"
-                          f"Activity: {presence_info.get('activity', 'Not set')}",
-                    inline=False
-                )
-                embed.add_field(
-                    name="Embed Color",
-                    value=f"#{self.settings.get('embed_color', '2F3136')[2:]}",
-                    inline=False
-                )
-                
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-
-            if action == "set_presence":
-                if not value:
-                    choices = ["online", "idle", "dnd", "invisible"]
-                    formatted_choices = "\n".join(f"• `{choice}`" for choice in choices)
-                    await interaction.response.send_message(
-                        f"Please choose a presence status:\n{formatted_choices}",
-                        ephemeral=True
-                    )
-                    return
-                
-                value = value.lower()
-                if value not in ["online", "idle", "dnd", "invisible"]:
-                    await interaction.response.send_message(
-                        "Invalid status! Choose: `online`, `idle`, `dnd`, or `invisible`",
-                        ephemeral=True
-                    )
-                    return
-
-            elif action == "set_activity":
-                if not value:
-                    activity_types = ["playing", "watching", "listening", "competing"]
-                    formatted_types = "\n".join(f"• `{type} <text>`" for type in activity_types)
-                    examples = [
-                        "`playing Minecraft`",
-                        "`watching over {server_name}`",
-                        "`listening to music`",
-                        "`competing in tournaments`"
-                    ]
-                    await interaction.response.send_message(
-                        f"Please provide an activity type and text:\n\n"
-                        f"**Available Types:**\n{formatted_types}\n\n"
-                        f"**Examples:**\n" + "\n".join(examples),
-                        ephemeral=True
-                    )
-                    return
-
-            if action == "set_name":
-                self.settings["server_name"] = value
-                response = f"Server name updated to: **{value}**"
-                await self._update_bot_presence()  # Update presence after name change
-
-            elif action == "set_color":
-                # Validate color format
-                if not value.startswith("0x") or len(value) != 8:
-                    await interaction.response.send_message(
-                        "Color must be in format: `0xRRGGBB`",
-                        ephemeral=True
-                    )
-                    return
-                
-                self.settings["embed_color"] = value
-                response = f"Embed color updated to: `#{value[2:]}`"
-
-            elif action == "set_activity":
-                if not value:
-                    await interaction.response.send_message(
-                        "Please provide an activity!\n"
-                        "Format: `<type> <text>`\n"
-                        "Types: `playing`, `watching`, `listening`, `competing`\n"
-                        "Example: `watching over {server_name}`",
-                        ephemeral=True
-                    )
-                    return
-
-                # Update activity text
-                if not "presence" in self.settings:
-                    self.settings["presence"] = {"status": "online", "activity": ""}
-                
-                self.settings["presence"]["activity"] = value
-                await self._update_bot_presence()
-                response = f"Bot activity updated to: **{value}**"
-
-            elif action == "set_presence":
-                valid_statuses = ["online", "idle", "dnd", "invisible"]
-                if not value or value.lower() not in valid_statuses:
-                    await interaction.response.send_message(
-                        "Please provide a valid status!\n"
-                        "Available statuses: `online`, `idle`, `dnd`, `invisible`",
-                        ephemeral=True
-                    )
-                    return
-
-                if not "presence" in self.settings:
-                    self.settings["presence"] = {"status": "online", "activity": ""}
-                
-                status = value.lower()
-                self.settings["presence"]["status"] = status
-                await self._update_bot_presence()
-                response = f"Bot presence updated to: **{status}**"
-
-            else:
-                response = "Invalid action!"
-
-            # Save and respond
-            self._save_settings()
-            await interaction.response.send_message(response, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"Error in settings command: {e}")
-            await interaction.response.send_message(
-                "An error occurred while updating settings",
-                ephemeral=True
-            )
+        # Create settings embed
+        presence_info = self.settings.get("presence", {})
+        embed = discord.Embed(
+            title="Bot Settings",
+            description="Current settings:",
+            color=self.embed_color
+        )
+        embed.add_field(
+            name="Server Name",
+            value=self.settings.get("server_name", "Not set"),
+            inline=False
+        )
+        embed.add_field(
+            name="Presence",
+            value=f"Status: {presence_info.get('status', 'online')}\n"
+                  f"Activity: {presence_info.get('activity', 'Not set')}",
+            inline=False
+        )
+        embed.add_field(
+            name="Embed Color",
+            value=f"#{self.settings.get('embed_color', '2F3136')[2:]}",
+            inline=False
+        )
+        
+        view = SettingsView(self)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(Settings(bot))
-    logger.info("Settings cog loaded successfully") 
+    await bot.add_cog(Settings(bot)) 

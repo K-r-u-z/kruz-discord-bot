@@ -3,7 +3,7 @@
     "enabled": true,
     "message": {
         "title": "Welcome to {server_name}! 👋",
-        "description": "Edit your welcome message with `/welcome edit`. View the formatting guide with `/welcome formatting.`",
+        "description": "Edit your welcome message with by clicking the options in /welcome.`",
         "footer": "We currently have {member_count} Members! (Editable)"
     }
 }

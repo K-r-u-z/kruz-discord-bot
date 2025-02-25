@@ -51,7 +51,198 @@ class WelcomeMessageModal(ui.Modal):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+        try:
+            # Get footer value or empty string if not provided
+            footer = self.footer_input.value.strip() if self.footer_input.value else ""
+
+            # Update welcome config with new message
+            self.cog.welcome_config["message"] = {
+                "title": self.title_input.value,
+                "description": self.description_input.value,
+                "footer": footer
+            }
+            
+            # Save the changes
+            self.cog._save_settings()
+
+            # Show updated settings
+            embed = create_welcome_embed(self.cog)
+            view = WelcomeSettingsView(self.cog)
+            
+            await interaction.response.edit_message(
+                embed=embed,
+                view=view
+            )
+            
+            await interaction.followup.send(
+                "✅ Welcome message updated! Use the test button to preview.",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error saving welcome message: {e}")
+            await interaction.response.send_message(
+                "An error occurred while saving the welcome message.",
+                ephemeral=True
+            )
+
+class BaseSettingsView(discord.ui.View):
+    def __init__(self, cog: 'Welcome', previous_view=None):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.previous_view = previous_view
+
+    @discord.ui.button(label="◀️ Back", style=discord.ButtonStyle.gray, row=4)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.previous_view:
+            await interaction.response.edit_message(
+                embed=create_welcome_embed(self.cog),
+                view=self.previous_view
+            )
+
+class WelcomeSettingsView(BaseSettingsView):
+    def __init__(self, cog: 'Welcome'):
+        super().__init__(cog, None)
+        self.remove_item(self.back_button)
+
+    @discord.ui.button(label="📌 Setup Channel", style=discord.ButtonStyle.primary)
+    async def setup_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            channel = interaction.channel
+            current_channel_id = self.cog.welcome_config.get("channel_id")
+            
+            # Check if channel is already set
+            if current_channel_id == channel.id:
+                await interaction.response.send_message(
+                    f"❌ Welcome channel is already set to {channel.mention}!",
+                    ephemeral=True
+                )
+                return
+            
+            self.cog.welcome_config["channel_id"] = channel.id
+            self.cog.welcome_config["enabled"] = True
+            self.cog._save_settings()
+            
+            await interaction.response.send_message(
+                f"✅ Welcome messages will now be sent in {channel.mention}!",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error setting welcome channel: {e}")
+            await interaction.response.send_message(
+                "Failed to setup welcome channel!",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="📋 Show Format", style=discord.ButtonStyle.secondary)
+    async def show_format(self, interaction: discord.Interaction, button: discord.ui.Button):
+        format_info = (
+            "**Available placeholders:**\n"
+            "`{user_mention}` - Mentions the new member\n"
+            "`{user_name}` - Member's username\n"
+            "`{display_name}` - Member's display name\n"
+            "`{user_id}` - Member's ID\n"
+            "`{server_name}` - Server name\n"
+            "`{member_count}` - Current member count\n\n"
+            "**Text Formatting (Title & Description only):**\n"
+            "`**text**` - **Bold**\n"
+            "`__text__` - __Underline__\n"
+            "`*text*` - *Italic*\n"
+            "`***text***` - ***Bold Italic***\n"
+            "`__*text*__` - __*Underline Italic*__\n"
+            "`**__text__**` - **__Bold Underline__**\n"
+            "`***__text__***` - ***__Bold Italic Underline__***\n"
+            "\\`text\\` - `Inline Code`\n\n"
+            "Note: Footer text does not support formatting"
+        )
+        
+        embed = discord.Embed(
+            title="Welcome Message Format",
+            description=format_info,
+            color=self.cog.embed_color
+        )
+        
+        # Add current message preview
+        config = self.cog.welcome_config.get("message", {})
+        embed.add_field(
+            name="Current Message",
+            value=(
+                f"**Title:**\n{config.get('title', 'Not set')}\n\n"
+                f"**Description:**\n{config.get('description', 'Not set')}\n\n"
+                f"**Footer:**\n{config.get('footer', 'Not set')}"
+            ),
+            inline=False
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="📝 Edit Message", style=discord.ButtonStyle.primary)
+    async def edit_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = WelcomeMessageModal(self.cog, self.cog.welcome_config)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="👋 Send Test", style=discord.ButtonStyle.success)
+    async def send_test(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.cog.welcome_config.get("channel_id"):
+            await interaction.response.send_message(
+                "Please set up a welcome channel first!",
+                ephemeral=True
+            )
+            return
+
+        await self.cog.on_member_join(interaction.user)
+        await interaction.response.send_message(
+            "Sent test welcome message!",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="🔄 Toggle", style=discord.ButtonStyle.secondary)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        current_state = self.cog.welcome_config.get("enabled", True)
+        self.cog.welcome_config["enabled"] = not current_state
+        self.cog._save_settings()
+        
+        await interaction.response.send_message(
+            f"Welcome messages {'disabled' if current_state else 'enabled'}!",
+            ephemeral=True
+        )
+
+def create_welcome_embed(cog: 'Welcome') -> discord.Embed:
+    """Create the welcome settings overview embed"""
+    channel_id = cog.welcome_config.get("channel_id")
+    channel = cog.bot.get_channel(channel_id) if channel_id else None
+    is_enabled = cog.welcome_config.get("enabled", True)
+    
+    embed = discord.Embed(
+        title="Welcome Settings",
+        description="Current welcome message settings:",
+        color=cog.embed_color
+    )
+    
+    embed.add_field(
+        name="Status",
+        value="✅ Enabled" if is_enabled else "❌ Disabled",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Channel",
+        value=channel.mention if channel else "Not set",
+        inline=False
+    )
+    
+    message = cog.welcome_config.get("message", {})
+    if message:
+        embed.add_field(
+            name="Current Message",
+            value=(
+                f"**Title:**\n{message.get('title', 'Not set')}\n\n"
+                f"**Description:**\n{message.get('description', 'Not set')}\n\n"
+                f"**Footer:**\n{message.get('footer', 'Not set')}"
+            ),
+            inline=False
+        )
+    
+    return embed
 
 class Welcome(commands.Cog):
     """Cog for handling welcome messages"""
@@ -74,7 +265,7 @@ class Welcome(commands.Cog):
                 "enabled": True,
                 "message": {
                     "title": "Welcome to {server_name}! 👋",
-                    "description": "Edit your welcome message with `/welcome edit`. View the formatting guide with `/welcome formatting.`",
+                    "description": "Edit your welcome message with by clicking the options in /welcome.`",
                     "footer": "We currently have {member_count} Members! (Editable)"
                 }
             }
@@ -170,156 +361,11 @@ class Welcome(commands.Cog):
     )
     @app_commands.guilds(GUILD)
     @app_commands.checks.has_permissions(administrator=True)
-    @app_commands.describe(
-        setting="Choose what to configure",
-        value="New value for the setting"
-    )
-    @app_commands.choices(setting=[
-        app_commands.Choice(name="👋 Test Welcome", value="test"),
-        app_commands.Choice(name="📝 Edit Message", value="edit"),
-        app_commands.Choice(name="⚙️ Setup Channel", value="setup"),
-        app_commands.Choice(name="📋 Show Format", value="formatting"),
-        app_commands.Choice(name="🔄 Toggle", value="toggle")
-    ])
-    async def welcome_settings(
-        self,
-        interaction: discord.Interaction,
-        setting: str,
-        value: Optional[str] = None
-    ) -> None:
+    async def welcome_settings(self, interaction: discord.Interaction):
         """Configure welcome message settings"""
-        try:
-            if setting == "setup":
-                # Use the current channel
-                self.welcome_config["channel_id"] = interaction.channel_id
-                self.welcome_config["enabled"] = True  # Enable welcome messages by default
-                self._save_settings()
-                
-                await interaction.response.send_message(
-                    f"✅ Welcome messages will now be sent in this channel!\nUse `/welcome test` to preview the message.",
-                    ephemeral=True
-                )
-                return
-
-            if setting == "test":
-                # Check if channel is set
-                if not self.welcome_config.get("channel_id"):
-                    await interaction.response.send_message(
-                        "Welcome channel not set! Please use `/welcome channel #channel` to set up the welcome channel first.",
-                        ephemeral=True
-                    )
-                    return
-
-                await self.on_member_join(interaction.user)
-                await interaction.response.send_message("Sent test welcome message!", ephemeral=True)
-                return
-
-            if setting == "show":
-                # Get current channel
-                channel_id = self.welcome_config.get("channel_id")
-                channel = interaction.guild.get_channel(channel_id) if channel_id else None
-                channel_info = channel.mention if channel else "No channel set"
-
-                # Get current status
-                is_enabled = self.welcome_config.get("enabled", True)
-                status = "✅ Welcome messages are enabled" if is_enabled else "❌ Welcome messages are disabled"
-
-                embed = discord.Embed(
-                    title="Welcome Message Settings",
-                    description=f"{status}\nChannel: {channel_info}",
-                    color=self.embed_color
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-
-            if setting == "formatting":
-                format_info = (
-                    "**Available placeholders:**\n"
-                    "`{user_mention}` - Mentions the new member\n"
-                    "`{user_name}` - Member's username\n"
-                    "`{display_name}` - Member's display name\n"
-                    "`{user_id}` - Member's ID\n"
-                    "`{server_name}` - Server name\n"
-                    "`{member_count}` - Current member count\n\n"
-                    "**Text Formatting (Title & Description only):**\n"
-                    "`**text**` - **Bold**\n"
-                    "`__text__` - __Underline__\n"
-                    "`*text*` - *Italic*\n"
-                    "`***text***` - ***Bold Italic***\n"
-                    "`__*text*__` - __*Underline Italic*__\n"
-                    "`**__text__**` - **__Bold Underline__**\n"
-                    "`***__text__***` - ***__Bold Italic Underline__***\n"
-                    "\\`text\\` - `Inline Code`\n\n"
-                    "Note: Footer text does not support formatting\n\n"
-                    f"**Current Title:**\n{self.welcome_config['message']['title']}\n\n"
-                    f"**Current Description:**\n{self.welcome_config['message']['description']}\n\n"
-                    f"**Current Footer:**\n{self.welcome_config['message']['footer']}"
-                )
-                
-                embed = discord.Embed(title="Welcome Message Format", description=format_info, color=self.embed_color)
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-
-            if setting == "edit":
-                modal = WelcomeMessageModal(self, self.welcome_config)
-                await interaction.response.send_modal(modal)
-                await modal.wait()
-
-                # Get footer value or empty string if not provided
-                footer = modal.footer_input.value.strip() if modal.footer_input.value else ""
-
-                self.welcome_config["message"] = {
-                    "title": modal.title_input.value,
-                    "description": modal.description_input.value,
-                    "footer": footer
-                }
-                
-                self._save_settings()
-                await interaction.followup.send(
-                    "Welcome message updated! Use `/welcome test` to preview.",
-                    ephemeral=True
-                )
-                return
-
-            # Replace enable/disable with toggle
-            if setting == "toggle":
-                current_state = self.welcome_config.get("enabled", True)
-                self.welcome_config["enabled"] = not current_state
-                
-                new_state = "enabled" if not current_state else "disabled"
-                response = f"Welcome messages {new_state}!"
-                
-                self._save_settings()
-                await interaction.response.send_message(response, ephemeral=True)
-                return
-
-            # Remove the old enable/disable blocks
-            if setting == "enable":
-                if self.welcome_config.get("enabled", True):
-                    await interaction.response.send_message("Welcome messages are already enabled!", ephemeral=True)
-                    return
-                self.welcome_config["enabled"] = True
-                response = "Welcome messages enabled!"
-
-            elif setting == "disable":
-                if not self.welcome_config.get("enabled", True):
-                    await interaction.response.send_message("Welcome messages are already disabled!", ephemeral=True)
-                    return
-                self.welcome_config["enabled"] = False
-                response = "Welcome messages disabled!"
-
-            else:
-                response = "Invalid setting or missing required value!"
-
-            self._save_settings()
-            await interaction.response.send_message(response, ephemeral=True)
-            
-        except Exception as e:
-            logger.error(f"Error in welcome settings: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("An error occurred while updating settings", ephemeral=True)
-            else:
-                await interaction.followup.send("An error occurred while updating settings", ephemeral=True)
+        embed = create_welcome_embed(self)
+        view = WelcomeSettingsView(self)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(
         name="autorole",
@@ -419,4 +465,3 @@ class Welcome(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Welcome(bot))
-    logger.info("Welcome cog loaded successfully")

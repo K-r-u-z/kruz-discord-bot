@@ -7,7 +7,7 @@ import asyncio
 import async_timeout
 import time
 import logging
-from config import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT, GUILD_ID, MEME_CHANNEL_ID, BOT_SETTINGS
+from config import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT, GUILD_ID, BOT_SETTINGS
 import json
 import os
 from typing import Optional, Dict, Any, List
@@ -19,66 +19,277 @@ EMBED_COLOR = int(BOT_SETTINGS["embed_color"], 16)
 
 GUILD = discord.Object(id=GUILD_ID)
 
+# Add at the top of the file with other constants
+DEFAULT_BLOCKED_WORDS = [
+    "onlyfans", "democrat", "harassment", "kink", "discrimination", "woke", "meth", 
+    "cutting", "anti-vax", "sexist", "genocide", "bdsm", "hostage", "LGBT", "suicide",
+    "university", "psychopath", "school", "gun", "5G", "assault", "nazi", "trauma",
+    "transphobic", "gore", "disturbing", "communism", "execution", "racist", "xenophobia",
+    "xxx", "fascist", "capitalism", "sensitive", "insane", "adult", "LSD", "teacher",
+    "lewd", "racism", "graphic", "self-harm", "nsfw", "drugs", "war", "terrorist",
+    "sex", "misandry", "dealer", "dead", "fetish", "incest", "maniac", "overdose",
+    "republican", "jerkoff", "hate", "beating", "offensive", "stalker", "shooting",
+    "bomb", "hentai", "religion", "conspiracy", "kidnap", "love", "psychedelic",
+    "Biden", "crazy", "kill", "fraud", "trigger", "misogyny", "masturbate", "camgirl",
+    "political", "molestation", "blood", "bigot", "uncensored", "religious",
+    "masturbation", "cocaine", "scam", "abduction", "death", "election", "rape",
+    "flat earth", "BLM", "explicit", "Trump", "politics", "college", "mental illness",
+    "gender", "education", "homophobic", "slur", "pedophile", "torture", "nude",
+    "abuse", "escort", "chemtrails", "heroin", "porn", "warning", "crime", "stripper",
+    "stab", "student", "murder", "sociopath"
+]
+
+class BaseSettingsView(discord.ui.View):
+    def __init__(self, cog: 'MemesCog', previous_view=None):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.previous_view = previous_view
+
+    @discord.ui.button(label="◀️ Back", style=discord.ButtonStyle.gray, row=4)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.previous_view:
+            await interaction.response.edit_message(
+                content=None,
+                embed=discord.Embed(
+                    title="Meme Settings",
+                    description="Click a button below to manage meme settings:",
+                    color=EMBED_COLOR
+                ),
+                view=self.previous_view
+            )
+
+class MemeSettingsView(BaseSettingsView):
+    def __init__(self, cog: 'MemesCog'):
+        super().__init__(cog, None)
+        self.remove_item(self.back_button)
+
+    @discord.ui.button(label="🔄 Toggle", style=discord.ButtonStyle.primary)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.cog.meme_task_running:
+            self.cog.post_meme.cancel()
+            self.cog.meme_task_running = False
+            self.cog.is_posting = False
+            await interaction.response.send_message("Meme poster has been disabled!", ephemeral=True)
+        else:
+            self.cog.post_meme.change_interval(minutes=self.cog.meme_interval)
+            self.cog.post_meme.start()
+            self.cog.meme_task_running = True
+            await interaction.response.send_message(
+                f"Meme poster has been enabled! Posting every {self.cog.meme_interval} minutes.",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="🚫 Block Words", style=discord.ButtonStyle.danger)
+    async def block_words(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = BlockWordsModal(self.cog)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="✨ Unblock Words", style=discord.ButtonStyle.success)
+    async def unblock_words(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = UnblockWordsModal(self.cog)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="📋 List Blocked", style=discord.ButtonStyle.secondary)
+    async def list_blocked(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Create embed to show blocked words
+        embed = discord.Embed(
+            title="🚫 Blocked Words",
+            description="Currently blocked words for meme filtering:",
+            color=EMBED_COLOR
+        )
+        
+        # Sort blocked words alphabetically
+        sorted_words = sorted(self.cog.blocked_words)
+        
+        # Split into chunks of 15 words per field
+        chunk_size = 15
+        for i in range(0, len(sorted_words), chunk_size):
+            chunk = sorted_words[i:i + chunk_size]
+            field_name = f"Words {i+1}-{min(i+chunk_size, len(sorted_words))}"
+            field_value = "• " + "\n• ".join(chunk)
+            embed.add_field(
+                name=field_name,
+                value=field_value,
+                inline=False
+            )
+        
+        embed.set_footer(text=f"Total blocked words: {len(self.cog.blocked_words)}")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="📌 Setup Channel", style=discord.ButtonStyle.secondary)
+    async def setup_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            channel = interaction.channel
+            current_channel_id = self.cog.meme_channel_id
+            
+            # Check if channel is already set to this channel
+            if current_channel_id == channel.id:
+                await interaction.response.send_message(
+                    f"❌ Meme channel is already set to {channel.mention}!",
+                    ephemeral=True
+                )
+                return
+            
+            self.cog.meme_channel_id = channel.id
+            self.cog.settings['meme_channel_id'] = channel.id
+            self.cog.save_settings()
+            
+            await interaction.response.send_message(
+                f"✅ Meme channel set to {channel.mention}!",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error setting meme channel: {e}")
+            await interaction.response.send_message(
+                "Failed to set meme channel!",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="⏱️ Set Interval", style=discord.ButtonStyle.secondary)
+    async def set_interval(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = IntervalModal(self.cog)
+        await interaction.response.send_modal(modal)
+
+class BlockWordsModal(discord.ui.Modal, title="Block Words"):
+    keywords = discord.ui.TextInput(
+        label="Words to Block",
+        placeholder="Enter words separated by commas",
+        style=discord.TextStyle.paragraph,
+        required=True
+    )
+
+    def __init__(self, cog: 'MemesCog'):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Split keywords by commas and clean whitespace
+        new_keywords = [k.strip().lower() for k in self.keywords.value.split(",")]
+        
+        # Add new keywords to blocked words
+        added = []
+        for keyword in new_keywords:
+            if keyword and keyword not in self.cog.blocked_words:
+                self.cog.blocked_words.add(keyword)
+                added.append(keyword)
+        
+        # Save settings
+        self.cog.settings['blocked_words'] = list(self.cog.blocked_words)
+        self.cog.save_settings()
+        
+        if added:
+            await interaction.response.send_message(
+                f"Added blocked keywords: {', '.join(added)}",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "All specified keywords were already blocked.",
+                ephemeral=True
+            )
+
+class UnblockWordsModal(discord.ui.Modal, title="Unblock Words"):
+    keywords = discord.ui.TextInput(
+        label="Words to Unblock",
+        placeholder="Enter words separated by commas",
+        style=discord.TextStyle.paragraph,
+        required=True
+    )
+
+    def __init__(self, cog: 'MemesCog'):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Split keywords by commas and clean whitespace
+        keywords_to_remove = [k.strip().lower() for k in self.keywords.value.split(",")]
+        
+        # Remove keywords from blocked words
+        removed = []
+        for keyword in keywords_to_remove:
+            if keyword in self.cog.blocked_words:
+                self.cog.blocked_words.remove(keyword)
+                removed.append(keyword)
+        
+        # Save settings
+        self.cog.settings['blocked_words'] = list(self.cog.blocked_words)
+        self.cog.save_settings()
+        
+        if removed:
+            await interaction.response.send_message(
+                f"Removed blocked keywords: {', '.join(removed)}",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "None of the specified keywords were in the blocked list.",
+                ephemeral=True
+            )
+
+class IntervalModal(discord.ui.Modal, title="Set Posting Interval"):
+    interval = discord.ui.TextInput(
+        label="Interval (minutes)",
+        placeholder="Enter number of minutes between posts",
+        default="60",
+        required=True
+    )
+
+    def __init__(self, cog: 'MemesCog'):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            new_interval = int(self.interval.value)
+            if new_interval < 1:
+                await interaction.response.send_message(
+                    "Interval must be at least 1 minute!",
+                    ephemeral=True
+                )
+                return
+
+            self.cog.meme_interval = new_interval
+            self.cog.settings['meme_interval'] = new_interval
+            self.cog.save_settings()
+
+            if self.cog.meme_task_running:
+                self.cog.post_meme.change_interval(minutes=new_interval)
+
+            await interaction.response.send_message(
+                f"Posting interval updated to {new_interval} minutes!",
+                ephemeral=True
+            )
+        except ValueError:
+            await interaction.response.send_message(
+                "Please enter a valid number!",
+                ephemeral=True
+            )
+
 class MemesCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.settings_file = 'data/meme_settings.json'
-        self.meme_channel_id = MEME_CHANNEL_ID
         self.is_posting = False
         self.max_stored_memes = 1000
         
-        # Default blocked words
-        self.default_blocked_words = [
-            # NSFW content
-            'nsfw', 'nude', 'porn', 'sex', 'xxx', 'onlyfans', 'love', 'jerkoff', 
-            'masturbation', 'masturbate', 'adult', 'explicit', 'lewd', 'uncensored', 
-            'fetish', 'kink', 'bdsm', 'hentai', 'camgirl', 'stripper', 'escort',
-
-            # Violence
-            'gore', 'death', 'kill', 'murder', 'blood', 'suicide', 'dead', 'assault',
-            'abuse', 'torture', 'beating', 'gun', 'shooting', 'stab', 'execution',
-            'bomb', 'terrorist', 'hostage',
-
-            # Hate speech/offensive
-            'racist', 'racism', 'nazi', 'hate', 'slur', 'offensive', 'homophobic',
-            'transphobic', 'sexist', 'bigot', 'discrimination', 'xenophobia',
-            'misogyny', 'misandry',
-
-            # Controversial topics
-            'politics', 'political', 'gender', 'religion', 'religious', 'school',
-            'college', 'university', 'teacher', 'student', 'education', 'war',
-            'genocide', 'fascist', 'communism', 'capitalism', 'election', 'democrat',
-            'republican', 'Biden', 'Trump', 'BLM', 'woke', 'LGBT',
-
-            # Potentially disturbing
-            'disturbing', 'graphic', 'trigger', 'warning', 'sensitive', 'self-harm',
-            'cutting', 'abduction', 'kidnap', 'harassment', 'stalker', 'molestation',
-            'rape', 'incest', 'pedophile', 'trauma',
-
-            # Illegal or unethical content
-            'drugs', 'cocaine', 'meth', 'heroin', 'LSD', 'psychedelic', 'overdose',
-            'dealer', 'crime', 'fraud', 'scam',
-
-            # Other potentially problematic words
-            'mental illness', 'psychopath', 'sociopath', 'maniac', 'crazy', 'insane',
-            'conspiracy', '5G', 'flat earth', 'anti-vax', 'chemtrails'
-        ]
-        
         # Load settings
-        self.settings = self.load_settings()
+        self.settings = self._load_settings()
+        self.meme_channel_id = self.settings.get('meme_channel_id')
         self.meme_interval = self.settings.get('meme_interval', 60)
         self.last_post_time = self.settings.get('last_post_time', 0)
-        self.blocked_words = set(self.settings.get('blocked_words', self.default_blocked_words))
+        self.blocked_words = set(self.settings.get('blocked_words', []))
         self.posted_memes = set(self.settings.get('posted_memes', []))
         self.meme_task_running = False
         
         # Initialize Reddit client
         self.reddit = self.setup_reddit()
-        logger.info("MemesCog initialized successfully")
 
-    def load_settings(self) -> Dict[str, Any]:
+    def _load_settings(self) -> Dict[str, Any]:
         """Load meme settings from file"""
         try:
+            # Create data directory if it doesn't exist
+            os.makedirs('data', exist_ok=True)
+            
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r') as f:
                     return json.load(f)
@@ -87,8 +298,9 @@ class MemesCog(commands.Cog):
             default_settings = {
                 "meme_interval": 60,
                 "last_post_time": 0,
-                "blocked_words": self.default_blocked_words,  # Use default blocked words
-                "posted_memes": []
+                "blocked_words": DEFAULT_BLOCKED_WORDS,  # Add default blocked words
+                "posted_memes": [],
+                "meme_channel_id": None
             }
             
             # Save default settings
@@ -102,8 +314,9 @@ class MemesCog(commands.Cog):
             return {
                 "meme_interval": 60,
                 "last_post_time": 0,
-                "blocked_words": self.default_blocked_words,  # Use default blocked words here too
-                "posted_memes": []
+                "blocked_words": DEFAULT_BLOCKED_WORDS,  # Add default blocked words here too
+                "posted_memes": [],
+                "meme_channel_id": None
             }
 
     def save_settings(self) -> None:
@@ -113,7 +326,8 @@ class MemesCog(commands.Cog):
                 "meme_interval": self.meme_interval,
                 "last_post_time": self.last_post_time,
                 "blocked_words": list(self.blocked_words),
-                "posted_memes": list(self.posted_memes)
+                "posted_memes": list(self.posted_memes),
+                "meme_channel_id": self.meme_channel_id
             }
             with open(self.settings_file, 'w') as f:
                 json.dump(settings, f, indent=4)
@@ -122,10 +336,9 @@ class MemesCog(commands.Cog):
 
     @tasks.loop(minutes=2)
     async def post_meme(self) -> None:
-        """Main meme posting loop with error handling"""
-        if self.is_posting:
+        if self.is_posting or not self.meme_channel_id:
             return
-            
+        
         try:
             self.is_posting = True
             
@@ -134,15 +347,14 @@ class MemesCog(commands.Cog):
                 
             channel = self.bot.get_channel(self.meme_channel_id)
             if not channel:
-                raise ValueError("Meme channel not found")
+                logger.error("Meme channel not found")
+                return
 
             async with async_timeout.timeout(30):
                 meme = await self._fetch_and_filter_meme()
                 if meme:
                     await self._post_meme_to_channel(channel, meme)
                 
-        except asyncio.TimeoutError:
-            logger.error("Timeout in meme posting loop")
         except Exception as e:
             logger.error(f"Error in meme posting loop: {e}")
         finally:
@@ -157,143 +369,16 @@ class MemesCog(commands.Cog):
         description="🎭 Manage meme poster settings"
     )
     @app_commands.guilds(GUILD)
-    @app_commands.describe(
-        action="Choose what to do",
-        interval="Set posting interval (minutes)",
-        keywords="Keywords to block/unblock (comma separated)"
-    )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="🔄 Toggle", value="toggle"),
-        app_commands.Choice(name="🚫 Block Words", value="block"),
-        app_commands.Choice(name="✨ Unblock Words", value="unblock"),
-        app_commands.Choice(name="📋 List Blocked", value="list")
-    ])
     @app_commands.checks.has_permissions(administrator=True)
-    async def manage_memes(
-        self, 
-        interaction: discord.Interaction,
-        action: str,
-        interval: Optional[int] = None,
-        keywords: Optional[str] = None
-    ):
-        try:
-            if action == "toggle":
-                # Toggle meme posting
-                if self.meme_task_running:
-                    self.post_meme.cancel()
-                    self.meme_task_running = False
-                    self.is_posting = False
-                    await interaction.response.send_message("Meme poster has been disabled!", ephemeral=True)
-                else:
-                    # Update interval if provided
-                    if interval is not None:
-                        if interval < 1:
-                            await interaction.response.send_message("Interval must be at least 1 minute!", ephemeral=True)
-                            return
-                        self.meme_interval = interval
-                        self.settings['meme_interval'] = interval
-                        self.save_settings()
-
-                    # Start the task
-                    self.post_meme.change_interval(minutes=self.meme_interval)
-                    self.post_meme.start()
-                    self.meme_task_running = True
-                    await interaction.response.send_message(
-                        f"Meme poster has been enabled! Posting every {self.meme_interval} minutes.", 
-                        ephemeral=True
-                    )
-                return
-
-            elif action == "list":
-                # Create embed to show blocked words
-                embed = discord.Embed(
-                    title="🚫 Blocked Words",
-                    description="Currently blocked words for meme filtering:",
-                    color=EMBED_COLOR
-                )
-                
-                # Sort blocked words alphabetically
-                sorted_words = sorted(self.blocked_words)
-                
-                # Split into chunks of 15 words per field
-                chunk_size = 15
-                for i in range(0, len(sorted_words), chunk_size):
-                    chunk = sorted_words[i:i + chunk_size]
-                    field_name = f"Words {i+1}-{min(i+chunk_size, len(sorted_words))}"
-                    field_value = "• " + "\n• ".join(chunk)
-                    embed.add_field(
-                        name=field_name,
-                        value=field_value,
-                        inline=False
-                    )
-                
-                embed.set_footer(text=f"Total blocked words: {len(self.blocked_words)}")
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-
-            elif action == "block":
-                if not keywords:
-                    await interaction.response.send_message("Please provide keywords to block!", ephemeral=True)
-                    return
-                    
-                # Split keywords by commas and clean whitespace
-                new_keywords = [k.strip().lower() for k in keywords.split(",")]
-                
-                # Add new keywords to blocked words
-                added = []
-                for keyword in new_keywords:
-                    if keyword and keyword not in self.blocked_words:
-                        self.blocked_words.add(keyword)
-                        added.append(keyword)
-                
-                # Save settings
-                self.settings['blocked_words'] = list(self.blocked_words)
-                self.save_settings()
-                
-                if added:
-                    await interaction.response.send_message(
-                        f"Added blocked keywords: {', '.join(added)}",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.response.send_message(
-                        "All specified keywords were already blocked.",
-                        ephemeral=True
-                    )
-
-            elif action == "unblock":
-                if not keywords:
-                    await interaction.response.send_message("Please provide keywords to unblock!", ephemeral=True)
-                    return
-                    
-                # Split keywords by commas and clean whitespace
-                keywords_to_remove = [k.strip().lower() for k in keywords.split(",")]
-                
-                # Remove keywords from blocked words
-                removed = []
-                for keyword in keywords_to_remove:
-                    if keyword in self.blocked_words:
-                        self.blocked_words.remove(keyword)
-                        removed.append(keyword)
-                
-                # Save settings
-                self.settings['blocked_words'] = list(self.blocked_words)
-                self.save_settings()
-                
-                if removed:
-                    await interaction.response.send_message(
-                        f"Removed blocked keywords: {', '.join(removed)}",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.response.send_message(
-                        "None of the specified keywords were in the blocked list.",
-                        ephemeral=True
-                    )
-
-        except Exception as e:
-            print(f"Error in kruzmemes command: {e}")
-            await interaction.response.send_message(f"Error in kruzmemes command: {str(e)}", ephemeral=True)
+    async def manage_memes(self, interaction: discord.Interaction):
+        """Manage meme poster settings"""
+        embed = discord.Embed(
+            title="Meme Settings",
+            description="Click a button below to manage meme settings:",
+            color=EMBED_COLOR
+        )
+        view = MemeSettingsView(self)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     def _is_valid_meme(self, meme):
         title_lower = meme.title.lower()
@@ -376,5 +461,5 @@ class MemesCog(commands.Cog):
             logger.error(f"Error posting meme: {e}")
             raise
 
-async def setup(bot):
+async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MemesCog(bot)) 

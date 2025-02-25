@@ -15,6 +15,349 @@ EMBED_COLOR = int(BOT_SETTINGS["embed_color"], 16)
 
 GUILD = discord.Object(id=GUILD_ID)
 
+# First define BaseSettingsView
+class BaseSettingsView(discord.ui.View):
+    def __init__(self, cog: 'ServerCommands', previous_view=None):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.previous_view = previous_view
+
+    @discord.ui.button(label="◀️ Back", style=discord.ButtonStyle.gray, row=4)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.previous_view:
+            await interaction.response.edit_message(
+                content=None,
+                embed=discord.Embed(
+                    title="Embed Settings",
+                    description="Click a button below to manage server embeds:",
+                    color=EMBED_COLOR
+                ),
+                view=self.previous_view
+            )
+
+# Then define PostSelectionView
+class PostSelectionView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view):
+        super().__init__(cog, previous_view)
+        self.add_category_buttons()
+
+    def add_category_buttons(self):
+        for category in self.cog.embed_contents.keys():
+            button = discord.ui.Button(
+                label=category,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"post_{category}"
+            )
+            button.callback = self.make_callback(category)
+            self.add_item(button)
+
+    def make_callback(self, category: str):
+        async def callback(interaction: discord.Interaction):
+            embeds = self.cog.embed_contents[category]
+            view = PostEmbedNameView(self.cog, self, category)
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title=f"Post {category} Embed",
+                    description="Select an embed to post:",
+                    color=EMBED_COLOR
+                ),
+                view=view
+            )
+        return callback
+
+class EmbedSettingsView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands'):
+        super().__init__(cog, None)
+        self.remove_item(self.back_button)
+        self.main_embed = discord.Embed(
+            title="Embed Settings",
+            description="• 📝 Create - Create a new embed\n"
+                       "• ✏️ Edit - Modify existing embeds\n"
+                       "• 📋 List All - View all embeds\n"
+                       "• 📤 Post - Post an embed to channel\n"
+                       "• 🗑️ Delete - Remove embeds or categories\n"
+                       "• 🔄 Refresh All - Update all posted embeds",
+            color=EMBED_COLOR
+        )
+
+    @discord.ui.button(label="📝 Create", style=discord.ButtonStyle.primary)
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = CreateEmbedModal(self.cog)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = DeleteSelectionView(self.cog, self)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Delete Embed",
+                description="Select what to delete:",
+                color=EMBED_COLOR
+            ),
+            view=view
+        )
+
+    @discord.ui.button(label="📋 List All", style=discord.ButtonStyle.secondary)
+    async def list_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._list_embeds(interaction)
+
+    @discord.ui.button(label="📤 Post", style=discord.ButtonStyle.success)
+    async def post(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = PostSelectionView(self.cog, self)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Post Embed",
+                description="Select what to post:",
+                color=EMBED_COLOR
+            ),
+            view=view
+        )
+
+    @discord.ui.button(label="🔄 Refresh All", style=discord.ButtonStyle.secondary)
+    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._refresh_all_embeds(interaction)
+
+    @discord.ui.button(label="✏️ Edit", style=discord.ButtonStyle.primary)
+    async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.cog.embed_contents:
+            await interaction.response.send_message(
+                "No embeds available to edit!",
+                ephemeral=True
+            )
+            return
+
+        view = EditEmbedView(self.cog, self)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Edit Embed",
+                description="Select a category to edit:",
+                color=EMBED_COLOR
+            ),
+            view=view
+        )
+
+class PostEmbedView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view):
+        super().__init__(cog, previous_view)
+        self.add_category_buttons()
+
+    def add_category_buttons(self):
+        for category in self.cog.embed_contents.keys():
+            button = discord.ui.Button(
+                label=category,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"post_{category}"
+            )
+            button.callback = self.make_callback(category)
+            self.add_item(button)
+
+    def make_callback(self, category: str):
+        async def callback(interaction: discord.Interaction):
+            embeds = self.cog.embed_contents[category]
+            view = PostEmbedNameView(self.cog, self, category)
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title=f"Post {category} Embed",
+                    description="Select an embed to post:",
+                    color=EMBED_COLOR
+                ),
+                view=view
+            )
+        return callback
+
+class PostEmbedNameView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view, category: str):
+        super().__init__(cog, previous_view)
+        self.category = category
+        self.add_embed_buttons()
+
+    def add_embed_buttons(self):
+        # Add individual embed buttons
+        for name in self.cog.embed_contents[self.category].keys():
+            button = discord.ui.Button(
+                label=name,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"post_{self.category}_{name}"
+            )
+            button.callback = self.make_callback(name)
+            self.add_item(button)
+
+        # Add "Post All" button
+        post_all = discord.ui.Button(
+            label="📑 Post All",
+            style=discord.ButtonStyle.success,
+            custom_id=f"post_all_{self.category}"
+        )
+        post_all.callback = self.post_all_callback
+        self.add_item(post_all)
+
+    def make_callback(self, name: str):
+        async def callback(interaction: discord.Interaction):
+            try:
+                await self.cog._post_embeds(interaction, self.category, name, interaction.channel)
+            except Exception as e:
+                logger.error(f"Error posting embed: {e}")
+                await interaction.followup.send("Error posting embed", ephemeral=True)
+        return callback
+
+    async def post_all_callback(self, interaction: discord.Interaction):
+        try:
+            await self.cog._post_embeds(interaction, self.category, channel=interaction.channel)
+        except Exception as e:
+            logger.error(f"Error posting all embeds: {e}")
+            await interaction.followup.send("Error posting all embeds", ephemeral=True)
+
+class EditEmbedView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view):
+        super().__init__(cog, previous_view)
+        self.add_category_buttons()
+
+    def add_category_buttons(self):
+        for category in self.cog.embed_contents.keys():
+            button = discord.ui.Button(
+                label=category,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"edit_{category}"
+            )
+            button.callback = self.make_callback(category)
+            self.add_item(button)
+
+    def make_callback(self, category: str):
+        async def callback(interaction: discord.Interaction):
+            embeds = self.cog.embed_contents[category]
+            view = EditEmbedNameView(self.cog, self, category)
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title=f"Edit {category} Embed",
+                    description="Select an embed to edit:",
+                    color=EMBED_COLOR
+                ),
+                view=view
+            )
+        return callback
+
+class EditEmbedNameView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view, category: str):
+        super().__init__(cog, previous_view)
+        self.category = category
+        self.add_embed_buttons()
+
+    def add_embed_buttons(self):
+        for name in self.cog.embed_contents[self.category].keys():
+            button = discord.ui.Button(
+                label=name,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"edit_{self.category}_{name}"
+            )
+            button.callback = self.make_callback(name)
+            self.add_item(button)
+
+    def make_callback(self, name: str):
+        async def callback(interaction: discord.Interaction):
+            embed_data = self.cog.embed_contents[self.category][name]
+            modal = CreateEmbedModal(
+                self.cog,
+                category=self.category,
+                name=name,
+                title=embed_data["title"],
+                content=embed_data["content"],
+                footer=embed_data.get("footer", "")
+            )
+            await interaction.response.send_modal(modal)
+        return callback
+
+class CreateEmbedModal(discord.ui.Modal):
+    def __init__(self, cog: 'ServerCommands', category=None, name=None, title=None, content=None, footer=None):
+        super().__init__(title="Create/Edit Embed")
+        self.cog = cog
+        
+        self.category_input = discord.ui.TextInput(
+            label="Category",
+            placeholder="e.g. rules, info",
+            required=True,
+            default=category or "",
+            style=discord.TextStyle.short
+        )
+        
+        self.name_input = discord.ui.TextInput(
+            label="Name",
+            placeholder="Name of the embed",
+            required=True,
+            default=name or "",
+            style=discord.TextStyle.short
+        )
+        
+        self.title_input = discord.ui.TextInput(
+            label="Title",
+            placeholder="Enter title...",
+            required=False,
+            default=title or "",
+            style=discord.TextStyle.short
+        )
+        
+        self.content = discord.ui.TextInput(
+            label="Content",
+            placeholder="Enter content...",
+            required=True,
+            default=content or "",
+            style=discord.TextStyle.paragraph
+        )
+        
+        self.footer = discord.ui.TextInput(
+            label="Footer (optional)",
+            placeholder="Enter footer text... (supports multiple lines)",
+            required=False,
+            max_length=2048,
+            style=discord.TextStyle.paragraph
+        )
+        
+        for item in [self.category_input, self.name_input, self.title_input, self.content, self.footer]:
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            # Store the embed
+            category = self.category_input.value.lower()
+            name = self.name_input.value.lower()
+            
+            if category not in self.cog.embed_contents:
+                self.cog.embed_contents[category] = {}
+                
+            self.cog.embed_contents[category][name] = {
+                "title": self.title_input.value,
+                "content": self.content.value,
+                "footer": self.footer.value if self.footer.value else None
+            }
+            
+            self.cog.save_embed_contents()
+
+            # Update posted embed if it exists
+            if category in self.cog.message_ids:
+                try:
+                    await self.cog._update_category_message(category, interaction.channel_id)
+                    await interaction.response.send_message(
+                        f"Successfully saved and updated embed {category}/{name}!", 
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    logger.error(f"Error updating posted embed: {e}")
+                    await interaction.response.send_message(
+                        f"Embed saved but failed to update posted message: {str(e)}", 
+                        ephemeral=True
+                    )
+            else:
+                await interaction.response.send_message(
+                    f"Successfully saved embed {category}/{name}!", 
+                    ephemeral=True
+                )
+            
+        except Exception as e:
+            logger.error(f"Error saving embed: {e}")
+            await interaction.response.send_message(
+                "An error occurred while saving the embed.", 
+                ephemeral=True
+            )
+
 class ServerCommands(commands.Cog):
     """Cog for managing server commands and embeds"""
 
@@ -30,6 +373,7 @@ class ServerCommands(commands.Cog):
         # Load data
         self.message_ids = self.load_message_ids()
         self.embed_contents = self.load_embed_contents()
+        self.embed_color = EMBED_COLOR
 
     def load_message_ids(self) -> Dict[str, Any]:
         """Load message IDs from file with error handling"""
@@ -91,64 +435,20 @@ class ServerCommands(commands.Cog):
         return True
 
     @app_commands.command(
-        name="kruzembeds",
-        description="📝 Create and manage embedded messages"
+        name="embed",
+        description="📝 Manage server embeds"
     )
     @app_commands.guilds(GUILD)
-    @app_commands.describe(
-        action="Choose what to do",
-        category="Category name (e.g. rules, info)",
-        name="Name of specific embed (required for edit/create)",
-        channel="Channel to post the embed in (optional, uses current channel by default)"
-    )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="📝 Create/Edit", value="edit"),
-        app_commands.Choice(name="🗑️ Delete", value="delete"),
-        app_commands.Choice(name="📋 List All", value="list"),
-        app_commands.Choice(name="📤 Post", value="post"),
-        app_commands.Choice(name="🔄 Refresh All", value="refresh")
-    ])
-    async def kruzembeds(
-        self,
-        interaction: discord.Interaction,
-        action: str,
-        category: Optional[str] = None,
-        name: Optional[str] = None,
-        channel: Optional[discord.TextChannel] = None
-    ) -> None:
-        """Manage embedded messages"""
-        try:
-            if action == "refresh":
-                # Refresh all embeds
-                await self._refresh_all_embeds(interaction)
-                return
-            
-            if action == "edit":
-                if not name:
-                    await interaction.response.send_message(
-                        "Please specify a name for the embed!",
-                        ephemeral=True
-                    )
-                    return
-                # Create/edit specific embed
-                await self._create_new_embed(interaction, category, name)
-            elif action == "delete":
-                # Delete embed or category
-                await self._delete_embed(interaction, category, name)
-            elif action == "list":
-                # List all embeds
-                await self._list_embeds(interaction, category)
-            elif action == "post":
-                # Use current channel if none specified
-                target_channel = channel or interaction.channel
-                # Post embed(s)
-                await self._post_embeds(interaction, category, name, target_channel)
-        except Exception as e:
-            logger.error(f"Error in kruzembeds command: {e}")
-            await interaction.response.send_message(
-                "An error occurred while managing embeds.",
-                ephemeral=True
-            )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def embed_command(self, interaction: discord.Interaction) -> None:
+        """Manage server embeds"""
+        embed = discord.Embed(
+            title="Embed Settings",
+            description="Click a button below to manage server embeds:",
+            color=EMBED_COLOR
+        )
+        view = EmbedSettingsView(self)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def _create_embed(
         self,
@@ -161,7 +461,7 @@ class ServerCommands(commands.Cog):
                 content = self.embed_contents[category][name]
                 
                 embed = discord.Embed(
-                    title=content.get("title"),
+                    title=content.get("title", name),
                     description=content.get("content", ""),
                     color=EMBED_COLOR
                 )
@@ -247,34 +547,36 @@ class ServerCommands(commands.Cog):
                 )
                 return
 
-            # Create and send embeds
+            # Create all embeds for the category
+            embeds = []
             if name:
                 # Post specific embed
-                embed = await self._create_embed(category, name)
-                if embed:
-                    message = await channel.send(embed=embed)
-                    # Convert old string format to dict format if needed
-                    if category in self.message_ids and isinstance(self.message_ids[category], str):
-                        self.message_ids[category] = {}
-                    # Initialize category dict if it doesn't exist
-                    if category not in self.message_ids:
-                        self.message_ids[category] = {}
-                    # Store message ID for individual embed
-                    self.message_ids[category][name] = str(message.id)
-                    self.save_message_ids()
+                embed = discord.Embed(
+                    title=self.embed_contents[category][name].get("title"),
+                    description=self.embed_contents[category][name].get("content"),
+                    color=self.embed_color
+                )
+                if self.embed_contents[category][name].get("footer"):
+                    embed.set_footer(text=self.embed_contents[category][name]["footer"])
+                embeds.append(embed)
             else:
                 # Post all embeds in category
-                embeds = []
                 for embed_name in self.embed_contents[category]:
-                    embed = await self._create_embed(category, embed_name)
-                    if embed:
-                        embeds.append(embed)
+                    embed = discord.Embed(
+                        title=self.embed_contents[category][embed_name].get("title"),
+                        description=self.embed_contents[category][embed_name].get("content"),
+                        color=self.embed_color
+                    )
+                    if self.embed_contents[category][embed_name].get("footer"):
+                        embed.set_footer(text=self.embed_contents[category][embed_name]["footer"])
+                    embeds.append(embed)
 
-                if embeds:
-                    message = await channel.send(embeds=embeds)
-                    # Store message ID for category
-                    self.message_ids[category] = str(message.id)
-                    self.save_message_ids()
+            # Send all embeds in one message
+            message = await channel.send(embeds=embeds)
+            
+            # Store message ID
+            self.message_ids[category] = str(message.id)
+            self.save_message_ids()
 
             await interaction.response.send_message(
                 "Successfully posted embed(s)!",
@@ -299,7 +601,7 @@ class ServerCommands(commands.Cog):
             # Initialize category if it doesn't exist
             if category not in self.embed_contents:
                 self.embed_contents[category] = {}
-
+            
             # Get existing content if editing
             existing = self.embed_contents[category].get(name, {})
 
@@ -309,27 +611,27 @@ class ServerCommands(commands.Cog):
                     
                     self.title_input = discord.ui.TextInput(
                         label="Title",
-                        style=discord.TextStyle.short,
                         placeholder="Enter title...",
                         required=False,
-                        default=existing.get("title", "")
+                        default=existing.get("title", ""),
+                        style=discord.TextStyle.short
                     )
                     
                     self.content = discord.ui.TextInput(
                         label="Content",
-                        style=discord.TextStyle.paragraph,
                         placeholder="Enter content...",
                         required=True,
-                        default=existing.get("content", "")
+                        default=existing.get("content", ""),
+                        style=discord.TextStyle.paragraph
                     )
                     
                     self.footer = discord.ui.TextInput(
                         label="Footer (optional)",
-                        style=discord.TextStyle.paragraph,
                         placeholder="Enter footer text... (supports multiple lines)",
                         required=False,
                         default=existing.get("footer", ""),
-                        max_length=2048
+                        max_length=2048,
+                        style=discord.TextStyle.paragraph
                     )
                     
                     self.add_item(self.title_input)
@@ -353,8 +655,15 @@ class ServerCommands(commands.Cog):
                             channel_id = interaction.channel_id
                             await self.cog._update_category_message(category, channel_id)
                         
+                        embed = discord.Embed(
+                            title="Embed Settings",
+                            description="Click a button below to manage server embeds:",
+                            color=EMBED_COLOR
+                        )
+                        view = EmbedSettingsView(self.cog)
                         await interaction.response.send_message(
-                            f"Successfully saved embed {category}/{name}!",
+                            embed=embed,
+                            view=view,
                             ephemeral=True
                         )
                     except Exception as e:
@@ -367,13 +676,10 @@ class ServerCommands(commands.Cog):
             modal = EmbedModal()
             modal.cog = self
             await interaction.response.send_modal(modal)
-            
+
         except Exception as e:
-            logger.error(f"Error in create/edit embed: {e}")
-            await interaction.response.send_message(
-                "An error occurred while creating/editing the embed.",
-                ephemeral=True
-            )
+            logger.error(f"Error saving embed: {e}")
+            raise
 
     async def _delete_embed(
         self,
@@ -384,9 +690,13 @@ class ServerCommands(commands.Cog):
         """Delete an embed or category"""
         try:
             if category not in self.embed_contents:
-                await interaction.response.send_message(
-                    f"Category '{category}' not found!",
-                    ephemeral=True
+                await interaction.edit_original_response(
+                    embed=discord.Embed(
+                        title="Error",
+                        description=f"Category '{category}' not found!",
+                        color=EMBED_COLOR
+                    ),
+                    view=EmbedSettingsView(self)
                 )
                 return
 
@@ -407,12 +717,12 @@ class ServerCommands(commands.Cog):
                             del self.message_ids[category]
                             self.save_message_ids()
                     
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         f"Successfully deleted embed {category}/{name}!",
                         ephemeral=True
                     )
                 else:
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         f"Embed '{name}' not found in category '{category}'!",
                         ephemeral=True
                     )
@@ -426,14 +736,14 @@ class ServerCommands(commands.Cog):
                     del self.message_ids[category]
                     self.save_message_ids()
                 
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"Successfully deleted category '{category}'!",
                     ephemeral=True
                 )
 
         except Exception as e:
             logger.error(f"Error deleting embed: {e}")
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "An error occurred while deleting.",
                 ephemeral=True
             )
@@ -448,44 +758,33 @@ class ServerCommands(commands.Cog):
             if not channel:
                 return
 
-            # Handle both old (string) and new (dict) message ID formats
-            message_id_data = self.message_ids[category]
-            if isinstance(message_id_data, dict):
-                # Create a list of items to avoid modification during iteration
-                items = list(message_id_data.items())
-                for name, msg_id in items:
-                    try:
-                        message = await channel.fetch_message(int(msg_id))
-                        embed = await self._create_embed(category, name)
-                        if embed:
-                            await message.edit(embed=embed)
-                    except discord.NotFound:
-                        # Message was deleted, remove from tracking
-                        if name in self.message_ids[category]:
-                            del self.message_ids[category][name]
-            else:
-                # Old format where we store a single message ID for category
-                try:
-                    message = await channel.fetch_message(int(message_id_data))
-                    # Create all embeds for the category
-                    embeds = []
-                    for name in self.embed_contents[category]:
-                        embed = await self._create_embed(category, name)
-                        if embed:
-                            embeds.append(embed)
-                    if embeds:
-                        await message.edit(embeds=embeds)
-                except discord.NotFound:
-                    # Message was deleted, remove from tracking
-                    del self.message_ids[category]
+            message_id = self.message_ids[category]
+            try:
+                message = await channel.fetch_message(int(message_id))
+                
+                # Create all embeds for the category
+                embeds = []
+                for name in self.embed_contents[category]:
+                    embed = discord.Embed(
+                        title=self.embed_contents[category][name].get("title"),
+                        description=self.embed_contents[category][name].get("content"),
+                        color=self.embed_color
+                    )
+                    if self.embed_contents[category][name].get("footer"):
+                        embed.set_footer(text=self.embed_contents[category][name]["footer"])
+                    embeds.append(embed)
 
-            # Clean up empty categories
-            if category in self.message_ids and not self.message_ids[category]:
+                # Update the message with all embeds
+                await message.edit(embeds=embeds)
+                
+            except discord.NotFound:
+                # Message was deleted, remove from tracking
                 del self.message_ids[category]
                 self.save_message_ids()
 
         except Exception as e:
             logger.error(f"Error updating category message: {e}")
+            raise
 
     def save_message_ids(self) -> None:
         """Save message IDs to file"""
@@ -511,18 +810,27 @@ class ServerCommands(commands.Cog):
 
             updated_count = 0
             failed_count = 0
+            to_remove = []
             
-            # Create a copy of the message IDs to iterate over
-            categories_to_update = list(self.message_ids.items())
-
-            for category, message_id in categories_to_update:
+            # Store categories to remove after iteration
+            for category, message_id in dict(self.message_ids).items():
                 if category in self.embed_contents:
                     try:
                         await self._update_category_message(category, interaction.channel_id)
                         updated_count += 1
+                    except discord.NotFound:
+                        # Add to removal list if message not found
+                        to_remove.append(category)
+                        failed_count += 1
                     except Exception as e:
                         logger.error(f"Error refreshing category {category}: {e}")
                         failed_count += 1
+
+            # Remove any invalid message IDs after iteration
+            for category in to_remove:
+                del self.message_ids[category]
+            if to_remove:
+                self._save_json(self.ids_file, self.message_ids)
 
             status = f"Refresh complete! Updated {updated_count} embed message(s)"
             if failed_count > 0:
@@ -537,11 +845,147 @@ class ServerCommands(commands.Cog):
                 ephemeral=True
             )
 
+class DeleteSelectionView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view):
+        super().__init__(cog, previous_view)
+        self.add_category_buttons()
+
+    def add_category_buttons(self):
+        for category in self.cog.embed_contents.keys():
+            # Add button for each category
+            button = discord.ui.Button(
+                label=category,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"delete_{category}"
+            )
+            button.callback = self.make_callback(category)
+            self.add_item(button)
+
+            # Add delete category button
+            delete_cat_button = discord.ui.Button(
+                label=f"Delete {category} Category",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"delete_category_{category}"
+            )
+            delete_cat_button.callback = self.make_category_callback(category)
+            self.add_item(delete_cat_button)
+
+    def make_callback(self, category: str):
+        async def callback(interaction: discord.Interaction):
+            view = DeleteEmbedNameView(self.cog, self, category)
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title=f"Delete {category} Embed",
+                    description="Select an embed to delete:",
+                    color=EMBED_COLOR
+                ),
+                view=view
+            )
+        return callback
+
+    def make_category_callback(self, category: str):
+        async def callback(interaction: discord.Interaction):
+            confirm_view = DeleteConfirmView(self.cog, self, category)
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="Confirm Delete",
+                    description=f"Are you sure you want to delete the entire '{category}' category?\n"
+                               "This will delete all embeds in this category!",
+                    color=EMBED_COLOR
+                ),
+                view=confirm_view
+            )
+        return callback
+
+class DeleteEmbedNameView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view, category: str):
+        super().__init__(cog, previous_view)
+        self.category = category
+        self.add_embed_buttons()
+
+    def add_embed_buttons(self):
+        for name in self.cog.embed_contents[self.category].keys():
+            button = discord.ui.Button(
+                label=name,
+                style=discord.ButtonStyle.danger,
+                custom_id=f"delete_{self.category}_{name}"
+            )
+            button.callback = self.make_callback(name)
+            self.add_item(button)
+
+    def make_callback(self, name: str):
+        async def callback(interaction: discord.Interaction):
+            confirm_view = DeleteConfirmView(self.cog, self.previous_view, self.category, name)
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="Confirm Delete",
+                    description=f"Are you sure you want to delete '{name}' from '{self.category}'?",
+                    color=EMBED_COLOR
+                ),
+                view=confirm_view
+            )
+        return callback
+
+class DeleteConfirmView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view, category: str, name: str = None):
+        super().__init__(cog, previous_view)
+        self.category = category
+        self.name = name
+
+    @discord.ui.button(label="✅ Confirm", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Edit the current message to show "deleting" status
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Deleting...",
+                description="Please wait while the embed is being deleted.",
+                color=EMBED_COLOR
+            ),
+            view=None
+        )
+
+        await self.cog._delete_embed(interaction, self.category, self.name)
+        # Return to main menu
+        embed = discord.Embed(
+            title="Embed Settings",
+            description="Click a button below to manage server embeds:",
+            color=EMBED_COLOR
+        )
+        view = EmbedSettingsView(self.cog)
+        await interaction.edit_original_response(embed=embed, view=view)
+
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Return to previous menu
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Delete Cancelled",
+                description="Deletion was cancelled.",
+                color=EMBED_COLOR
+            ),
+            view=self.previous_view
+        )
+
+class CategorySelectionView(BaseSettingsView):
+    def __init__(self, cog: 'ServerCommands', previous_view):
+        super().__init__(cog, previous_view)
+        
+        self.category_input = discord.ui.TextInput(
+            label="Category",
+            placeholder="e.g. rules, info",
+            required=True
+        )
+        self.name_input = discord.ui.TextInput(
+            label="Name",
+            placeholder="Name of the embed",
+            required=True
+        )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        category = self.category_input.value.lower()
+        name = self.name_input.value.lower()
+        await self.cog._create_new_embed(interaction, category, name)
+
 async def setup(bot: commands.Bot) -> None:
     """Set up the Commands cog"""
-    try:
-        await bot.add_cog(ServerCommands(bot))
-        logger.info("Commands cog loaded successfully")
-    except Exception as e:
-        logger.error(f"Error loading Commands cog: {e}")
-        raise 
+    await bot.add_cog(ServerCommands(bot)) 

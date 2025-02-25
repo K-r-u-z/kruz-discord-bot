@@ -1,0 +1,23 @@
+{
+    "enabled": false,
+    "channel_id": null,
+    "announced_games": [],
+    "webhook_secret": null,
+    "cached_games": [],
+    "filters": {
+        "min_rating": 0,
+        "min_price": 0,
+        "currency": "EUR",
+        "stores": [
+            "steam",
+            "epic",
+            "gog",
+            "humble",
+            "itch",
+            "origin",
+            "uplay",
+            "battlenet"
+        ],
+        "notify_roles": []
+    }
+}

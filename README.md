@@ -13,9 +13,8 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### Automatic Memes
 - Automated meme posting system
-- Content filtering and word blocking
-- Customizable posting settings
-- Support for multiple subreddits
+- Content filtering and word blocking (customizable)
+- Customizable posting intervals
 
 ### Embed System
 - Create and manage embedded messages
@@ -25,10 +24,16 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - Posts to current channel by default
 - Clean preview system for embed contents
 
+### Free Games Announcements
+- Automatic free game notifications
+- Customizable filters (store, price, rating)
+- Game details with thumbnails and links
+- Configurable announcement channel
+
 ### Moderation
-- Warning system
-- Message purging
-- More moderation features coming soon
+- Warning system with DM notifications
+- Message purging commands
+- More moderation features planned
 
 ## Commands
 
@@ -63,6 +68,13 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
   - `🎮 Change Activity` - Set bot's activity
   - `🔵 Change Status` - Set bot's online status
 
+### Meme Commands
+- `/kruzmemes` - Manage meme poster settings
+  - `🔄 Toggle` - Enable/Disable meme posting
+  - `⏱️ Set Interval` - Change posting frequency
+  - `📌 Set Channel` - Set meme channel
+  - `🚫 Block Words` - Manage word filters
+
 ### Embed Management
 - `/kruzembeds` - Create and manage embedded messages
   - `📝 Create/Edit` - Create or edit an embed
@@ -75,41 +87,38 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
   - `📤 Post` - Post embed(s) to the current channel
     - Post single embed or entire category
     - Auto-updates when changes are made
-  - `🔄 Refresh All` - Refresh all tracked embeds
+  - `🔄 Refresh All` - Refresh all tracked embeds (incase auto updates fail for some reason)
 
-
-Example Usage:
-```
-# Creating and Editing Embeds
-/kruzembeds edit rules welcome      # Create/edit a welcome embed in rules category
-/kruzembeds edit news announcement  # Create/edit an announcement in news category
-
-# Posting Embeds
-/kruzembeds post rules welcome      # Post a single embed
-/kruzembeds post rules             # Post all embeds in category
-/kruzembeds post rules #channel    # Post to specific channel
-
-# Managing Embeds
-/kruzembeds list                   # List all embeds
-/kruzembeds list rules            # List embeds in category
-/kruzembeds delete rules welcome  # Delete specific embed
-/kruzembeds delete rules         # Delete entire category
-/kruzembeds refresh              # Update all tracked embeds
-
-# Tips:
+  # Tips:
 - Categories help organize related embeds (rules, news, info, etc.)
 - Embeds auto-update when edited
 - Use descriptive names for easy management
 - Preview before posting with list command
-```
 
-### Meme Commands
-- `/kruzmemes` - Manage meme poster settings
-  - `🔄 Toggle` - Enable/Disable meme posting
-  - `🚫 Block Words` - Add words to block list
-  - `✨ Unblock Words` - Remove words from block list
-  - `📋 List Blocked Words` - List all blocked words
-  
+### Free Games Commands
+- `/freegames` - Configure free games announcements
+  - `📋 List Free Games` - Browse current free games
+  - `📌 Setup Channel` - Set announcement channel
+  - `🔄 Toggle` - Enable/Disable announcements
+  - `⚙️ Settings` - Configure filters and notifications
+  - `🧪 Test` - Send test announcement
+
+## Setup
+
+1. Clone repository
+2. Copy .env.example to .env and fill credentials:
+```env
+DISCORD_TOKEN=your_discord_token
+DISCORD_GUILD_ID=your_guild_id
+REDDIT_CLIENT_ID=your_reddit_client_id
+REDDIT_CLIENT_SECRET=your_reddit_client_secret
+REDDIT_USER_AGENT=your_reddit_user_agent
+FREESTUFF_API_KEY=your_freestuff_api_key
+
+```
+3. Install requirements: `pip install -r requirements.txt`
+4. Run: `python main.py`
+
 ## Available Placeholders
 
 Embeds support these placeholders:
@@ -131,22 +140,6 @@ Embeds support these formatting options in title and description:
 - `**__text__**` - **__Bold Underline__**
 - `***__text__***` - ***__Bold Italic Underline__***
 - \`text\` - `Inline Code`
-
-## Setup
-
-1. Clone this repository
-2. Copy .env.example to .env
-3. Fill in your credentials in .env:
-   ```env
-   DISCORD_TOKEN=your_discord_token_here
-   DISCORD_GUILD_ID=your_guild_id_here
-   MEME_CHANNEL_ID=your_meme_channel_id_here
-   REDDIT_CLIENT_ID=your_reddit_client_id_here
-   REDDIT_CLIENT_SECRET=your_reddit_client_secret_here
-   REDDIT_USER_AGENT=your_reddit_user_agent_here
-   ```
-4. Install requirements: `pip install -r requirements.txt`
-5. Run the bot: `python main.py`
 
 ## Technical Details
 
@@ -187,12 +180,15 @@ Embeds support these formatting options in title and description:
   - memes.py
   - settings.py
   - welcome.py
+  - freegames.py
   - __init__.py
 - data/
   - bot_settings.json
   - embed_contents.json
   - embedded_messages_ids.json
   - meme_settings.json
+  - freegames_settings.json
+  - welcome_settings.json
 
 ## Requirements
 - Python 3.8+
@@ -200,3 +196,4 @@ Embeds support these formatting options in title and description:
 - python-dotenv
 - asyncpraw
 - async-timeout
+- aiohttp

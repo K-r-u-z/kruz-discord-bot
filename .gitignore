@@ -12,9 +12,5 @@ env/
 .vscode/
 .idea/
 
-# Bot data files
-data/*.json
-!data/*.example.json
-
 # Logs
 *.log 

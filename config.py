@@ -17,12 +17,14 @@ def get_env_var(name: str, required: bool = True) -> str:
 # Discord Bot Configuration with validation
 TOKEN = get_env_var('DISCORD_TOKEN')
 GUILD_ID = int(get_env_var('DISCORD_GUILD_ID'))
-MEME_CHANNEL_ID = int(get_env_var('MEME_CHANNEL_ID'))
 
 # Reddit Configuration
 REDDIT_CLIENT_ID = get_env_var('REDDIT_CLIENT_ID')
 REDDIT_CLIENT_SECRET = get_env_var('REDDIT_CLIENT_SECRET')
 REDDIT_USER_AGENT = get_env_var('REDDIT_USER_AGENT')
+
+# FreeStuff API Configuration
+FREESTUFF_API_KEY = get_env_var('FREESTUFF_API_KEY')
 
 def _get_default_settings() -> Dict[str, Any]:
     """Return default bot settings"""
@@ -87,10 +89,10 @@ def validate_env_vars():
     required_vars = {
         'DISCORD_TOKEN': TOKEN,
         'DISCORD_GUILD_ID': GUILD_ID,
-        'MEME_CHANNEL_ID': MEME_CHANNEL_ID,
         'REDDIT_CLIENT_ID': REDDIT_CLIENT_ID,
         'REDDIT_CLIENT_SECRET': REDDIT_CLIENT_SECRET,
-        'REDDIT_USER_AGENT': REDDIT_USER_AGENT
+        'REDDIT_USER_AGENT': REDDIT_USER_AGENT,
+        'FREESTUFF_API_KEY': FREESTUFF_API_KEY
     }
     
     missing = [k for k, v in required_vars.items() if not v]
