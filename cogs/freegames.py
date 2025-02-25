@@ -578,10 +578,26 @@ class SettingsConfigView(BaseSettingsView):
 
     @discord.ui.button(label="🔔 Notification Settings", style=discord.ButtonStyle.secondary)
     async def notification_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = BaseSettingsView(self.cog, self)
-        view.add_item(RoleSelect(self.cog, interaction.guild))
+        view = NotificationSettingsView(self.cog, self)
+        view.update_role_select(interaction.guild)
+        
+        filters = self.cog.settings.get("filters", {})
+        notify_roles = filters.get("notify_roles", [])
+        
+        roles_text = "__**Selected roles to ping:**__\n"
+        if "everyone" in notify_roles:
+            roles_text += "- @everyone\n"
+        
+        for role_id in notify_roles:
+            if role_id != "everyone":
+                if role := interaction.guild.get_role(int(role_id)):
+                    roles_text += f"- {role.mention} {'🔔' if role.mentionable else ''}\n"
+        
+        if not notify_roles:
+            roles_text += "*No roles selected*\n"
+        
         await interaction.response.edit_message(
-            content="Select roles to ping for new games:",
+            content=roles_text,
             embed=None,
             view=view
         )
@@ -735,9 +751,10 @@ class RoleSelect(discord.ui.Select):
         # Get all server roles except @everyone
         available_roles = [
             role for role in guild.roles
-            if not role.is_default()  # Only exclude @everyone role
+            if not role.is_default() and not role.managed  # Exclude bot roles too
         ]
         
+        # Start with @everyone option
         options = [
             discord.SelectOption(
                 label="@everyone",
@@ -746,12 +763,12 @@ class RoleSelect(discord.ui.Select):
             )
         ]
         
-        # Add all server roles
-        for role in available_roles:
+        # Add top roles (by position) up to Discord's limit of 25 total options
+        for role in sorted(available_roles, key=lambda r: r.position, reverse=True)[:24]:  # 24 to leave room for @everyone
             options.append(
                 discord.SelectOption(
                     label=role.name,
-                    emoji="🔔" if role.mentionable else None,  # Add indicator for mentionable roles
+                    emoji="🔔" if role.mentionable else None,
                     value=str(role.id),
                     default=str(role.id) in notify_roles
                 )
@@ -823,6 +840,97 @@ class StoreSettingsView(BaseSettingsView):
                     break
             await interaction.response.edit_message(view=self)
         return callback
+
+class RoleInputModal(discord.ui.Modal, title="Add Role by Name/ID"):
+    role_input = discord.ui.TextInput(
+        label="Role Name or ID",
+        placeholder="Enter role name or ID",
+        required=True
+    )
+
+    def __init__(self, cog: 'FreeGames', view):
+        super().__init__()
+        self.cog = cog
+        self.parent_view = view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        input_value = self.role_input.value.strip()
+        guild = interaction.guild
+        role = None
+
+        # Try to find role by ID first
+        if input_value.isdigit():
+            role = guild.get_role(int(input_value))
+
+        # If not found by ID, try to find by name
+        if not role:
+            role = discord.utils.get(guild.roles, name=input_value)
+
+        if not role:
+            await interaction.response.send_message(
+                "❌ Role not found. Please check the name/ID and try again.",
+                ephemeral=True
+            )
+            return
+
+        # Update notify_roles in settings
+        filters = self.cog.settings.setdefault("filters", DEFAULT_SETTINGS["filters"])
+        notify_roles = set(filters.get("notify_roles", []))
+        role_id = str(role.id)
+
+        if role_id in notify_roles:
+            notify_roles.remove(role_id)
+            action = "removed from"
+        else:
+            notify_roles.add(role_id)
+            action = "added to"
+
+        filters["notify_roles"] = list(notify_roles)
+        self.cog._save_settings()
+
+        # Update the display
+        await self._update_roles_display(interaction, role, action)
+
+    async def _update_roles_display(self, interaction: discord.Interaction, role: discord.Role, action: str):
+        filters = self.cog.settings.get("filters", {})
+        notify_roles = filters.get("notify_roles", [])
+        
+        roles_text = "__**Selected roles to ping:**__\n"
+        if "everyone" in notify_roles:
+            roles_text += "- @everyone\n"
+        
+        for role_id in notify_roles:
+            if role_id != "everyone":
+                if guild_role := interaction.guild.get_role(int(role_id)):
+                    roles_text += f"- {guild_role.mention} {'🔔' if guild_role.mentionable else ''}\n"
+        
+        if not notify_roles:
+            roles_text += "*No roles selected*\n"
+        
+        await interaction.response.edit_message(
+            content=f"✅ Role {role.mention} {action} notification list\n\n{roles_text}",
+            view=self.parent_view
+        )
+
+class NotificationSettingsView(BaseSettingsView):
+    def __init__(self, cog: 'FreeGames', previous_view=None):
+        super().__init__(cog, previous_view)
+        # Add button for manual role input
+        add_role_button = discord.ui.Button(
+            label="➕ Add Role Manually",
+            style=discord.ButtonStyle.secondary,
+            custom_id="add_role_manual"
+        )
+        add_role_button.callback = self.add_role_manually
+        self.add_item(add_role_button)
+
+    def update_role_select(self, guild: discord.Guild):
+        """Add role select after guild is available"""
+        self.add_item(RoleSelect(self.cog, guild))
+
+    async def add_role_manually(self, interaction: discord.Interaction):
+        modal = RoleInputModal(self.cog, self)
+        await interaction.response.send_modal(modal)
 
 def create_settings_embed(cog: 'FreeGames') -> discord.Embed:
     """Create an embed showing current settings"""
