@@ -62,7 +62,6 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### Settings Commands
 - `/settings` - Configure bot settings
-  - `📋 Show Settings` - Display current settings
   - `📝 Change Server Name` - Update server name
   - `🎨 Change Color` - Update embed color
   - `🎮 Change Activity` - Set bot's activity
@@ -113,7 +112,7 @@ DISCORD_GUILD_ID=your_guild_id
 REDDIT_CLIENT_ID=your_reddit_client_id
 REDDIT_CLIENT_SECRET=your_reddit_client_secret
 REDDIT_USER_AGENT=your_reddit_user_agent
-FREESTUFF_API_KEY=your_freestuff_api_key
+FREESTUFF_API_KEY=your_freestuff_api_key (https://docs.freestuffbot.xyz/)
 
 ```
 3. Install requirements: `pip install -r requirements.txt`
