@@ -283,6 +283,10 @@ class MemesCog(commands.Cog):
         
         # Initialize Reddit client
         self.reddit = self.setup_reddit()
+        
+        # Start meme task if it was enabled
+        if self.settings.get('enabled', False):
+            self.bot.loop.create_task(self._start_meme_task())
 
     def _load_settings(self) -> Dict[str, Any]:
         """Load meme settings from file"""
@@ -300,7 +304,8 @@ class MemesCog(commands.Cog):
                 "last_post_time": 0,
                 "blocked_words": DEFAULT_BLOCKED_WORDS,  # Add default blocked words
                 "posted_memes": [],
-                "meme_channel_id": None
+                "meme_channel_id": None,
+                "enabled": False  # Add enabled state
             }
             
             # Save default settings
@@ -316,7 +321,8 @@ class MemesCog(commands.Cog):
                 "last_post_time": 0,
                 "blocked_words": DEFAULT_BLOCKED_WORDS,  # Add default blocked words here too
                 "posted_memes": [],
-                "meme_channel_id": None
+                "meme_channel_id": None,
+                "enabled": False  # Add enabled state here too
             }
 
     def save_settings(self) -> None:
@@ -327,7 +333,8 @@ class MemesCog(commands.Cog):
                 "last_post_time": self.last_post_time,
                 "blocked_words": list(self.blocked_words),
                 "posted_memes": list(self.posted_memes),
-                "meme_channel_id": self.meme_channel_id
+                "meme_channel_id": self.meme_channel_id,
+                "enabled": self.meme_task_running  # Save enabled state
             }
             with open(self.settings_file, 'w') as f:
                 json.dump(settings, f, indent=4)
@@ -460,6 +467,14 @@ class MemesCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error posting meme: {e}")
             raise
+
+    async def _start_meme_task(self):
+        """Helper method to start meme task after bot is ready"""
+        await self.bot.wait_until_ready()
+        self.post_meme.change_interval(minutes=self.meme_interval)
+        self.post_meme.start()
+        self.meme_task_running = True
+        logger.info("Meme task started automatically based on saved settings")
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MemesCog(bot)) 

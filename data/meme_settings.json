@@ -119,5 +119,6 @@
         "sociopath"
     ],
     "posted_memes": [],
-    "meme_channel_id": null
+    "meme_channel_id": null,
+    "enabled": false
 }
