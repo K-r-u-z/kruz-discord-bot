@@ -298,7 +298,7 @@ class Welcome(commands.Cog):
             "display_name": member.display_name,
             "user_id": member.id,
             "member_count": member.guild.member_count,
-            "user_mention": member.mention  # Use proper mention format
+            "user_mention": f"<@{member.id}>"  # Use direct mention format instead of member.mention
         }
 
         return {
