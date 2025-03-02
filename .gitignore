@@ -7,10 +7,15 @@ __pycache__/
 venv/
 env/
 .env
+.venv/
 
 # IDE settings
 .vscode/
 .idea/
 
 # Logs
-*.log 
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db
