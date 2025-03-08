@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
-from typing import List
+from typing import List, Dict, Optional
 from datetime import datetime
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
 
@@ -56,6 +56,34 @@ handler.setFormatter(CustomFormatter())
 logging.getLogger('discord').setLevel(logging.WARNING)
 logger.addHandler(handler)
 
+# Rate limit tracking
+class RateLimitTracker:
+    def __init__(self):
+        self.rate_limits: Dict[str, Dict] = {}
+        self.global_rate_limit: Optional[float] = None
+        self.retry_after: Optional[float] = None
+
+    def update_route_limit(self, route: str, limit: int, remaining: int, reset: float):
+        self.rate_limits[route] = {
+            'limit': limit,
+            'remaining': remaining,
+            'reset': reset
+        }
+
+    def update_global_limit(self, retry_after: float):
+        self.global_rate_limit = datetime.now().timestamp() + retry_after
+        self.retry_after = retry_after
+
+    def should_retry(self) -> bool:
+        if self.global_rate_limit and datetime.now().timestamp() < self.global_rate_limit:
+            return False
+        return True
+
+    def get_retry_after(self) -> Optional[float]:
+        if self.global_rate_limit:
+            return max(0, self.global_rate_limit - datetime.now().timestamp())
+        return None
+
 class KruzBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -82,6 +110,9 @@ class KruzBot(commands.Bot):
         self.guild = discord.Object(id=GUILD_ID)
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
+        self.rate_limit_tracker = RateLimitTracker()
+        self.rate_limit_retries = 0
+        self.max_rate_limit_retries = 3
 
     async def setup_hook(self) -> None:
         """Initialize bot extensions and sync commands"""
@@ -102,19 +133,40 @@ class KruzBot(commands.Bot):
 
     async def on_error(self, event_method: str, *args, **kwargs) -> None:
         """Handle any uncaught errors"""
-        logger.error(f"Uncaught error in {event_method}: {args} {kwargs}")
-        if self.reconnect_attempts < self.max_reconnect_attempts:
-            self.reconnect_attempts += 1
-            try:
-                await self.close()
-                await self.start(TOKEN)
-            except Exception as e:
-                logger.error(f"Failed to reconnect: {e}")
+        error = kwargs.get('error')
+        if isinstance(error, discord.HTTPException):
+            if error.status == 429:  # Rate limit
+                retry_after = float(error.retry_after)
+                self.rate_limit_tracker.update_global_limit(retry_after)
+                logger.warning(f"Rate limit hit. Retry after {retry_after} seconds")
+                
+                if self.rate_limit_retries < self.max_rate_limit_retries:
+                    self.rate_limit_retries += 1
+                    await asyncio.sleep(retry_after)
+                    try:
+                        await self.close()
+                        await self.start(TOKEN)
+                    except Exception as e:
+                        logger.error(f"Failed to reconnect after rate limit: {e}")
+                else:
+                    logger.critical("Max rate limit retries reached")
+                    await self.close()
+            else:
+                logger.error(f"HTTP error in {event_method}: {error}")
         else:
-            logger.critical("Max reconnection attempts reached")
+            logger.error(f"Uncaught error in {event_method}: {args} {kwargs}")
+            if self.reconnect_attempts < self.max_reconnect_attempts:
+                self.reconnect_attempts += 1
+                try:
+                    await self.close()
+                    await self.start(TOKEN)
+                except Exception as e:
+                    logger.error(f"Failed to reconnect: {e}")
+            else:
+                logger.critical("Max reconnection attempts reached")
 
     async def on_socket_raw_receive(self, msg):
-        """Monitor websocket latency"""
+        """Monitor websocket latency and handle rate limits"""
         if self.ws:
             latency = self.ws.latency
             if latency > 5:  # If latency is over 5 seconds
@@ -124,10 +176,20 @@ class KruzBot(commands.Bot):
                     await self.close()
                     await self.start(TOKEN)
 
+            # Check for rate limit headers
+            if hasattr(msg, 'headers'):
+                retry_after = msg.headers.get('Retry-After')
+                if retry_after:
+                    retry_after = float(retry_after)
+                    self.rate_limit_tracker.update_global_limit(retry_after)
+                    logger.warning(f"Rate limit detected in websocket. Retry after {retry_after} seconds")
+                    await asyncio.sleep(retry_after)
+
     async def on_resumed(self):
         """Handle successful reconnection"""
         logger.info("Session resumed successfully")
         self.reconnect_attempts = 0
+        self.rate_limit_retries = 0
 
     async def on_disconnect(self):
         """Handle disconnection"""

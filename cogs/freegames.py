@@ -353,7 +353,7 @@ class FreeGames(commands.Cog):
         store_icon = STORE_ICONS.get(store)
         
         # Format price with current currency setting
-        original_price = self._format_price(game.get("worth", 0))
+        original_price = self._format_price(game.get("org_price", {}).get("dollar", 0))
         
         # Create description with proper formatting
         description = (
