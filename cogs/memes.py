@@ -230,13 +230,14 @@ class IntervalModal(discord.ui.Modal, title="Set Posting Interval"):
     interval = discord.ui.TextInput(
         label="Interval (minutes)",
         placeholder="Enter number of minutes between posts",
-        default="60",
         required=True
     )
 
     def __init__(self, cog: 'MemesCog'):
         super().__init__()
         self.cog = cog
+        # Set the current interval as the default value
+        self.interval.default = str(self.cog.meme_interval)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -254,6 +255,15 @@ class IntervalModal(discord.ui.Modal, title="Set Posting Interval"):
 
             if self.cog.meme_task_running:
                 self.cog.post_meme.change_interval(minutes=new_interval)
+                # Calculate and log next post time
+                next_iteration = self.cog.post_meme.next_iteration
+                if next_iteration:
+                    time_until = (next_iteration - discord.utils.utcnow()).total_seconds()
+                    minutes = max(0, int(time_until // 60))
+                    seconds = max(0, int(time_until % 60))
+                    logger.info(f"Updated meme posting interval to {new_interval} minutes. Next meme will be posted in {minutes}m {seconds}s")
+                else:
+                    logger.info(f"Updated meme posting interval to {new_interval} minutes")
 
             await interaction.response.send_message(
                 f"Posting interval updated to {new_interval} minutes!",
@@ -341,7 +351,7 @@ class MemesCog(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to save meme settings: {e}")
 
-    @tasks.loop(minutes=120)  # Changed from 2 to 120 minutes
+    @tasks.loop(minutes=120)  # Default value, will be updated from settings
     async def post_meme(self) -> None:
         if not self.meme_channel_id:
             return
@@ -379,7 +389,9 @@ class MemesCog(commands.Cog):
     @post_meme.before_loop
     async def before_post_meme(self):
         await self.bot.wait_until_ready()
-        logger.info("Meme posting task ready to start")
+        # Update interval from settings
+        self.post_meme.change_interval(minutes=self.meme_interval)
+        logger.info(f"Meme posting task ready to start with {self.meme_interval} minute interval")
 
     @app_commands.command(
         name="kruzmemes",
@@ -398,12 +410,36 @@ class MemesCog(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     def _is_valid_meme(self, meme):
+        """Check if a meme meets posting criteria"""
         title_lower = meme.title.lower()
-        return (meme.url.endswith(('.jpg', '.jpeg', '.png', '.gif'))
-                and meme.id not in self.posted_memes
-                and not meme.over_18
-                and not any(word in title_lower for word in self.blocked_words)
-                and not meme.spoiler)
+        
+        # Check image format
+        if not meme.url.endswith(('.jpg', '.jpeg', '.png', '.gif')):
+            logger.debug(f"Filtered meme {meme.id}: Not an image post")
+            return False
+            
+        # Check if already posted
+        if meme.id in self.posted_memes:
+            logger.debug(f"Filtered meme {meme.id}: Already posted")
+            return False
+            
+        # Check NSFW
+        if meme.over_18:
+            logger.debug(f"Filtered meme {meme.id}: NSFW content")
+            return False
+            
+        # Check blocked words
+        blocked = [word for word in self.blocked_words if word in title_lower]
+        if blocked:
+            logger.debug(f"Filtered meme {meme.id}: Contains blocked words: {', '.join(blocked)}")
+            return False
+            
+        # Check spoiler
+        if meme.spoiler:
+            logger.debug(f"Filtered meme {meme.id}: Marked as spoiler")
+            return False
+            
+        return True
 
     async def _should_post(self) -> bool:
         """Check if enough time has passed to post a new meme"""
@@ -509,7 +545,16 @@ class MemesCog(commands.Cog):
                     self.posted_memes = set(list(self.posted_memes)[-self.max_stored_memes:])
                 
                 self.save_settings()
-                logger.info(f"Successfully posted meme: {meme.id}")
+                
+                # Calculate time until next post using the task's next iteration
+                next_iteration = self.post_meme.next_iteration
+                if next_iteration:
+                    time_until = (next_iteration - discord.utils.utcnow()).total_seconds()
+                    minutes = max(0, int(time_until // 60))
+                    seconds = max(0, int(time_until % 60))
+                    logger.info(f"Successfully posted meme: {meme.id} | Next meme will be posted in {minutes}m {seconds}s")
+                else:
+                    logger.info(f"Successfully posted meme: {meme.id}")
                 return
                 
             except discord.HTTPException as e:
@@ -535,6 +580,12 @@ class MemesCog(commands.Cog):
         self.post_meme.start()
         self.meme_task_running = True
         logger.info("Meme task started automatically based on saved settings")
+
+    def update_task_interval(self) -> None:
+        """Update the task interval from settings"""
+        if self.meme_task_running:
+            self.post_meme.change_interval(minutes=self.meme_interval)
+            logger.info(f"Updated meme posting interval to {self.meme_interval} minutes")
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MemesCog(bot)) 

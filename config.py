@@ -2,16 +2,34 @@ import os
 import json
 from typing import Dict, Any
 from dotenv import load_dotenv
+import logging
 
-# Load environment variables
-if not load_dotenv():
-    raise RuntimeError("Failed to load .env file")
+logger = logging.getLogger(__name__)
+
+# Add debug logging for env file loading
+env_path = os.path.join(os.path.dirname(__file__), '.env')
+logger.info(f"Attempting to load .env file from: {env_path}")
+logger.info(f"Current working directory: {os.getcwd()}")
+
+# Clear existing environment variables we're about to set
+if 'DISCORD_TOKEN' in os.environ:
+    logger.info("Clearing existing DISCORD_TOKEN from environment")
+    del os.environ['DISCORD_TOKEN']
+
+# Load environment variables with override
+if not load_dotenv(env_path, override=True):
+    logger.error(f"Failed to load .env file from {env_path}")
+    raise RuntimeError(f"Failed to load .env file from {env_path}")
+else:
+    logger.info("Successfully loaded .env file")
 
 def get_env_var(name: str, required: bool = True) -> str:
     """Get environment variable with validation"""
     value = os.getenv(name)
     if required and not value:
+        logger.error(f"Missing required environment variable: {name}")
         raise ValueError(f"Missing required environment variable: {name}")
+    logger.info(f"Loaded environment variable: {name}")
     return value
 
 # Discord Bot Configuration with validation

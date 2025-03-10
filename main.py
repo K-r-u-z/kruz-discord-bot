@@ -5,6 +5,7 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
+import os
 
 # Configure logging
 logger = logging.getLogger()
@@ -15,7 +16,7 @@ class CustomFormatter(logging.Formatter):
     
     # Colors and styles
     grey = "\x1b[38;1m"
-    purple = "\x1b[35;1m"
+    blue = "\x1b[34;1m"
     yellow = "\x1b[33;1m"
     red = "\x1b[31;1m"
     bold_red = "\x1b[31;1m"
@@ -24,7 +25,7 @@ class CustomFormatter(logging.Formatter):
     # Format for different log levels
     FORMATS = {
         logging.DEBUG: grey + "[DEBUG] %(message)s" + reset,
-        logging.INFO: purple + "[INFO] %(message)s" + reset,
+        logging.INFO: blue + "[INFO] %(message)s" + reset,
         logging.WARNING: yellow + "[WARNING] %(message)s" + reset,
         logging.ERROR: red + "[ERROR] %(message)s" + reset,
         logging.CRITICAL: bold_red + "[CRITICAL] %(message)s" + reset
@@ -331,10 +332,23 @@ class KruzBot(commands.Bot):
         error = kwargs.get('error')
         if isinstance(error, discord.HTTPException):
             if error.status == 429:  # Rate limit
+                retry_after = error.response.headers.get('Retry-After', 60)
+                is_global = error.response.headers.get('X-RateLimit-Global', 'false').lower() == 'true'
+                
+                logger.warning(
+                    f"Rate limit encountered: Global: {is_global}, Retry After: {retry_after}s"
+                )
+                
+                # For global rate limits or shared hosting, use longer backoff
+                if is_global or os.environ.get('PRODUCTION'):
+                    retry_after = max(retry_after * 2, 300)  # At least 5 minutes
+                    logger.info(f"Extended backoff period: {retry_after}s")
+                
                 handled = await self.rate_limit_tracker.handle_rate_limit(error)
                 if handled and self.rate_limit_retries < self.max_rate_limit_retries:
                     self.rate_limit_retries += 1
                     try:
+                        await asyncio.sleep(retry_after)
                         # Retry the operation that failed
                         await self.close()
                         await self.start(TOKEN)
@@ -350,6 +364,7 @@ class KruzBot(commands.Bot):
             if self.reconnect_attempts < self.max_reconnect_attempts:
                 self.reconnect_attempts += 1
                 try:
+                    await asyncio.sleep(60)  # Add delay between reconnection attempts
                     await self.close()
                     await self.start(TOKEN)
                 except Exception as e:
@@ -482,6 +497,11 @@ class KruzBot(commands.Bot):
 async def main():
     """Main entry point"""
     try:
+        # Add delay before startup on production
+        if os.environ.get('PRODUCTION'):
+            logger.info("Production environment detected, waiting 30 seconds before startup...")
+            await asyncio.sleep(30)
+            
         async with KruzBot() as bot:
             await bot.start(TOKEN)
     except KeyboardInterrupt:
