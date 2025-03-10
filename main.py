@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 from config import TOKEN, GUILD_ID, BOT_SETTINGS
 
@@ -59,30 +59,224 @@ logger.addHandler(handler)
 # Rate limit tracking
 class RateLimitTracker:
     def __init__(self):
-        self.rate_limits: Dict[str, Dict] = {}
+        # Track rate limits per bucket
+        self.buckets: Dict[str, Dict] = {}
+        # Track route to bucket mapping
+        self.route_buckets: Dict[str, str] = {}
+        # Global rate limit tracking
         self.global_rate_limit: Optional[float] = None
-        self.retry_after: Optional[float] = None
+        # Track message rate limits per channel
+        self.message_limits: Dict[str, Dict] = {}
+        logger.info("Discord rate limit tracking system initialized")
+        logger.info(
+            "Discord Rate Limits:\n"
+            "  • Messages: 5 per 5s per channel\n"
+            "  • Global: 50 messages per second\n"
+            "  • Guild operations: Varies by endpoint\n"
+            "  • Bucket-based tracking enabled"
+        )
+        
+    def _parse_reset_time(self, reset_after: Optional[float] = None, reset_time: Optional[float] = None) -> float:
+        """Calculate reset time from either reset-after or reset timestamp"""
+        if reset_after is not None:
+            return datetime.now().timestamp() + float(reset_after)
+        elif reset_time is not None:
+            return float(reset_time)
+        return datetime.now().timestamp() + 60  # Default 60s fallback
 
-    def update_route_limit(self, route: str, limit: int, remaining: int, reset: float):
-        self.rate_limits[route] = {
-            'limit': limit,
-            'remaining': remaining,
-            'reset': reset
-        }
+    def update_bucket(self, headers: Dict[str, str], route: str) -> None:
+        """Update rate limit info from response headers"""
+        try:
+            bucket = headers.get('X-RateLimit-Bucket')
+            if not bucket:
+                return
 
-    def update_global_limit(self, retry_after: float):
-        self.global_rate_limit = datetime.now().timestamp() + retry_after
-        self.retry_after = retry_after
+            # Map route to bucket
+            self.route_buckets[route] = bucket
+            
+            # Update bucket information
+            limit = int(headers.get('X-RateLimit-Limit', 0))
+            remaining = int(headers.get('X-RateLimit-Remaining', 0))
+            reset = self._parse_reset_time(
+                reset_after=headers.get('X-RateLimit-Reset-After'),
+                reset_time=headers.get('X-RateLimit-Reset')
+            )
+            scope = headers.get('X-RateLimit-Scope', 'user')
+            
+            # Check if this is a message endpoint
+            is_message_endpoint = 'messages' in route.lower()
+            endpoint_type = "Message Endpoint" if is_message_endpoint else "General Endpoint"
+            
+            self.buckets[bucket] = {
+                'limit': limit,
+                'remaining': remaining,
+                'reset': reset,
+                'scope': scope,
+                'last_updated': datetime.now().timestamp(),
+                'is_message': is_message_endpoint
+            }
 
-    def should_retry(self) -> bool:
-        if self.global_rate_limit and datetime.now().timestamp() < self.global_rate_limit:
-            return False
-        return True
+            # Log rate limit status with more context
+            reset_time = datetime.fromtimestamp(reset).strftime('%H:%M:%S')
+            logger.info(
+                f"Discord Rate Limit Status ({endpoint_type}):\n"
+                f"  • Route: {route}\n"
+                f"  • Bucket: {bucket}\n"
+                f"  • Limit: {limit}\n"
+                f"  • Remaining: {remaining}\n"
+                f"  • Reset at: {reset_time}\n"
+                f"  • Scope: {scope}"
+            )
 
-    def get_retry_after(self) -> Optional[float]:
-        if self.global_rate_limit:
-            return max(0, self.global_rate_limit - datetime.now().timestamp())
+            # Special handling for message endpoints
+            if is_message_endpoint and remaining < 3:  # Warning earlier for messages
+                logger.warning(
+                    f"Discord Message Rate Limit Warning:\n"
+                    f"  • Only {remaining}/{limit} messages remaining\n"
+                    f"  • Route: {route}\n"
+                    f"  • Resets at {reset_time}"
+                )
+            # General warning if running low
+            elif remaining < 5:
+                logger.warning(
+                    f"Discord Rate Limit Warning:\n"
+                    f"  • Only {remaining}/{limit} requests remaining\n"
+                    f"  • Route: {route}\n"
+                    f"  • Resets at {reset_time}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error updating Discord rate limit bucket: {e}")
+
+    def update_global_limit(self, retry_after: float) -> None:
+        """Update global rate limit"""
+        self.global_rate_limit = datetime.now().timestamp() + float(retry_after)
+        reset_time = datetime.fromtimestamp(self.global_rate_limit).strftime('%H:%M:%S')
+        logger.warning(
+            f"Discord Global Rate Limit Hit:\n"
+            f"  • Cooling down for {retry_after:.2f} seconds\n"
+            f"  • Will reset at {reset_time}\n"
+            f"  • All requests will be paused"
+        )
+
+    def get_bucket_info(self, route: str) -> Optional[Dict]:
+        """Get rate limit info for a route"""
+        bucket = self.route_buckets.get(route)
+        if bucket:
+            return self.buckets.get(bucket)
         return None
+
+    def should_retry(self, route: str) -> Tuple[bool, Optional[float]]:
+        """Check if a request should be retried and get wait time"""
+        now = datetime.now().timestamp()
+        
+        # Check global rate limit
+        if self.global_rate_limit and now < self.global_rate_limit:
+            wait_time = self.global_rate_limit - now
+            reset_time = datetime.fromtimestamp(self.global_rate_limit).strftime('%H:%M:%S')
+            logger.info(
+                f"Global rate limit check for {route}:\n"
+                f"  • Must wait {wait_time:.2f}s\n"
+                f"  • Reset at {reset_time}"
+            )
+            return False, wait_time
+            
+        # Check bucket-specific rate limit
+        bucket_info = self.get_bucket_info(route)
+        if bucket_info:
+            remaining = bucket_info['remaining']
+            reset_time = datetime.fromtimestamp(bucket_info['reset']).strftime('%H:%M:%S')
+            
+            if remaining == 0 and now < bucket_info['reset']:
+                wait_time = bucket_info['reset'] - now
+                logger.info(
+                    f"Rate limit check for {route}:\n"
+                    f"  • No requests remaining\n"
+                    f"  • Must wait {wait_time:.2f}s\n"
+                    f"  • Reset at {reset_time}"
+                )
+                return False, wait_time
+                
+            if remaining < 1:
+                wait_time = bucket_info['reset'] - now
+                logger.info(
+                    f"Rate limit check for {route}:\n"
+                    f"  • {remaining} requests remaining\n"
+                    f"  • Must wait {wait_time:.2f}s\n"
+                    f"  • Reset at {reset_time}"
+                )
+                return False, wait_time
+            
+            logger.info(
+                f"Rate limit check for {route}:\n"
+                f"  • {remaining} requests remaining\n"
+                f"  • Resets at {reset_time}"
+            )
+        else:
+            logger.info(f"No rate limit info for route: {route}")
+        
+        return True, None
+
+    async def handle_rate_limit(self, error: discord.HTTPException) -> bool:
+        """Handle rate limit error and return True if handled"""
+        if error.status == 429:
+            headers = error.response.headers
+            retry_after = float(headers.get('Retry-After', 60))
+            is_global = headers.get('X-RateLimit-Global', 'false').lower() == 'true'
+            scope = headers.get('X-RateLimit-Scope', 'user')
+            bucket = headers.get('X-RateLimit-Bucket', 'unknown')
+            
+            reset_time = datetime.fromtimestamp(
+                datetime.now().timestamp() + retry_after
+            ).strftime('%H:%M:%S')
+            
+            if is_global:
+                self.update_global_limit(retry_after)
+                logger.warning(
+                    f"Discord Global Rate Limit Hit:\n"
+                    f"  • Scope: {scope}\n"
+                    f"  • Retry after: {retry_after:.2f}s\n"
+                    f"  • Reset at: {reset_time}\n"
+                    f"  • Global cooldown initiated"
+                )
+            else:
+                # Update bucket information
+                self.update_bucket(headers, error.response.url.path)
+                endpoint_type = "Message Endpoint" if 'messages' in error.response.url.path.lower() else "General Endpoint"
+                logger.warning(
+                    f"Discord Rate Limit Hit ({endpoint_type}):\n"
+                    f"  • Scope: {scope}\n"
+                    f"  • Bucket: {bucket}\n"
+                    f"  • Retry after: {retry_after:.2f}s\n"
+                    f"  • Reset at: {reset_time}\n"
+                    f"  • Route: {error.response.url.path}"
+                )
+            
+            # Use exponential backoff for retries
+            backoff_retry = min(retry_after * 1.5, 300)  # Cap at 5 minutes
+            logger.info(
+                f"Applying Discord rate limit backoff:\n"
+                f"  • Base retry: {retry_after:.2f}s\n"
+                f"  • With backoff: {backoff_retry:.2f}s"
+            )
+            await asyncio.sleep(backoff_retry)
+            return True
+            
+        return False
+
+    async def before_request(self, route: str) -> bool:
+        """Check rate limits before making a request"""
+        logger.info(f"Checking Discord rate limits for: {route}")
+        should_proceed, wait_time = self.should_retry(route)
+        if not should_proceed:
+            logger.warning(
+                f"Discord Rate Limit Prevention:\n"
+                f"  • Route: {route}\n"
+                f"  • Waiting: {wait_time:.2f}s\n"
+                f"  • Type: {'Message' if 'messages' in route.lower() else 'General'}"
+            )
+            await asyncio.sleep(wait_time)
+        return should_proceed
 
 class KruzBot(commands.Bot):
     def __init__(self) -> None:
@@ -113,6 +307,7 @@ class KruzBot(commands.Bot):
         self.rate_limit_tracker = RateLimitTracker()
         self.rate_limit_retries = 0
         self.max_rate_limit_retries = 3
+        logger.info("Rate limit tracking system initialized for bot")
 
     async def setup_hook(self) -> None:
         """Initialize bot extensions and sync commands"""
@@ -136,14 +331,11 @@ class KruzBot(commands.Bot):
         error = kwargs.get('error')
         if isinstance(error, discord.HTTPException):
             if error.status == 429:  # Rate limit
-                retry_after = float(error.retry_after)
-                self.rate_limit_tracker.update_global_limit(retry_after)
-                logger.warning(f"Rate limit hit. Retry after {retry_after} seconds")
-                
-                if self.rate_limit_retries < self.max_rate_limit_retries:
+                handled = await self.rate_limit_tracker.handle_rate_limit(error)
+                if handled and self.rate_limit_retries < self.max_rate_limit_retries:
                     self.rate_limit_retries += 1
-                    await asyncio.sleep(retry_after)
                     try:
+                        # Retry the operation that failed
                         await self.close()
                         await self.start(TOKEN)
                     except Exception as e:
@@ -176,14 +368,22 @@ class KruzBot(commands.Bot):
                     await self.close()
                     await self.start(TOKEN)
 
-            # Check for rate limit headers
-            if hasattr(msg, 'headers'):
-                retry_after = msg.headers.get('Retry-After')
-                if retry_after:
-                    retry_after = float(retry_after)
-                    self.rate_limit_tracker.update_global_limit(retry_after)
-                    logger.warning(f"Rate limit detected in websocket. Retry after {retry_after} seconds")
-                    await asyncio.sleep(retry_after)
+            # Update rate limit tracking from headers
+            if isinstance(msg, dict) and 'headers' in msg:
+                headers = msg['headers']
+                route = msg.get('route', '')
+                
+                # Update bucket information from headers
+                self.rate_limit_tracker.update_bucket(headers, route)
+                
+                # Handle rate limit if present
+                if 'Retry-After' in headers:
+                    retry_after = float(headers['Retry-After'])
+                    is_global = headers.get('X-RateLimit-Global', 'false').lower() == 'true'
+                    
+                    if is_global:
+                        self.rate_limit_tracker.update_global_limit(retry_after)
+                        await asyncio.sleep(retry_after)
 
     async def on_resumed(self):
         """Handle successful reconnection"""

@@ -147,7 +147,9 @@ Embeds support these formatting options in title and description:
 - Permission-based command access
 - Extensive content filtering
 - Input validation
-- Rate limiting protection
+- Rate limit protection
+- Bucket-based rate limiting
+- Global rate limit handling
 
 ### 💾 Data Storage
 - JSON-based configuration files
@@ -155,6 +157,7 @@ Embeds support these formatting options in title and description:
 - Memory-efficient data management
 - Automatic data cleanup
 - Periodic storage optimization
+- Rate limit state persistence
 
 ### 🔄 Error Handling
 - Comprehensive error catching
@@ -162,6 +165,8 @@ Embeds support these formatting options in title and description:
 - Connection recovery system
 - Command error feedback
 - Rate limit protection
+- Exponential backoff for rate limits
+- Automatic retry mechanisms
 
 ### 🚀 Performance
 - Efficient memory usage
@@ -169,6 +174,43 @@ Embeds support these formatting options in title and description:
 - Command cooldowns
 - Optimized data structures
 - Asynchronous operations
+- Rate limit prevention
+- Smart request throttling
+
+### 📊 Rate Limit Management
+- Discord API rate limit tracking
+- Per-route bucket management
+- Global rate limit handling
+- Message rate limit controls (5/5s per channel)
+- Proactive rate limit prevention
+- Detailed rate limit logging
+- Automatic backoff and retry
+- Rate limit state persistence
+- Smart request queuing
+- Exponential backoff for retries
+- Route-specific rate limit tracking
+- Rate limit header parsing
+- Bucket mapping and tracking
+- Remaining request monitoring
+- Reset time tracking
+- Rate limit warning system
+
+### 📝 Logging Features
+- Detailed rate limit logging
+- Request tracking
+- Rate limit warnings
+- Bucket status updates
+- Global rate limit notifications
+- Reset time tracking
+- Request remaining counters
+- Rate limit prevention logs
+- Retry attempt logging
+- Backoff duration tracking
+- Route-specific monitoring
+- Message rate tracking
+- API response logging
+- Error state logging
+- Recovery action logging
 
 ### 📁 File Structure
 - main.py

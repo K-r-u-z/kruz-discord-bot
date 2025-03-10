@@ -275,7 +275,7 @@ class MemesCog(commands.Cog):
         # Load settings
         self.settings = self._load_settings()
         self.meme_channel_id = self.settings.get('meme_channel_id')
-        self.meme_interval = self.settings.get('meme_interval', 60)
+        self.meme_interval = self.settings.get('meme_interval', 120)
         self.last_post_time = self.settings.get('last_post_time', 0)
         self.blocked_words = set(self.settings.get('blocked_words', []))
         self.posted_memes = set(self.settings.get('posted_memes', []))
@@ -300,12 +300,12 @@ class MemesCog(commands.Cog):
             
             # Create default settings if file doesn't exist
             default_settings = {
-                "meme_interval": 60,
+                "meme_interval": 120,  # Changed from 60 to 120 minutes
                 "last_post_time": 0,
-                "blocked_words": DEFAULT_BLOCKED_WORDS,  # Add default blocked words
+                "blocked_words": DEFAULT_BLOCKED_WORDS,
                 "posted_memes": [],
                 "meme_channel_id": None,
-                "enabled": False  # Add enabled state
+                "enabled": False
             }
             
             # Save default settings
@@ -317,12 +317,12 @@ class MemesCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error loading meme settings: {e}")
             return {
-                "meme_interval": 60,
+                "meme_interval": 120,  # Changed from 60 to 120 minutes
                 "last_post_time": 0,
-                "blocked_words": DEFAULT_BLOCKED_WORDS,  # Add default blocked words here too
+                "blocked_words": DEFAULT_BLOCKED_WORDS,
                 "posted_memes": [],
                 "meme_channel_id": None,
-                "enabled": False  # Add enabled state here too
+                "enabled": False
             }
 
     def save_settings(self) -> None:
@@ -334,24 +334,19 @@ class MemesCog(commands.Cog):
                 "blocked_words": list(self.blocked_words),
                 "posted_memes": list(self.posted_memes),
                 "meme_channel_id": self.meme_channel_id,
-                "enabled": self.meme_task_running  # Save enabled state
+                "enabled": self.meme_task_running
             }
             with open(self.settings_file, 'w') as f:
                 json.dump(settings, f, indent=4)
         except Exception as e:
             logger.error(f"Failed to save meme settings: {e}")
 
-    @tasks.loop(minutes=2)
+    @tasks.loop(minutes=120)  # Changed from 2 to 120 minutes
     async def post_meme(self) -> None:
-        if self.is_posting or not self.meme_channel_id:
+        if not self.meme_channel_id:
             return
         
         try:
-            self.is_posting = True
-            
-            if not await self._should_post():
-                return
-                
             channel = self.bot.get_channel(self.meme_channel_id)
             if not channel:
                 logger.error("Meme channel not found")
@@ -360,16 +355,31 @@ class MemesCog(commands.Cog):
             async with async_timeout.timeout(30):
                 meme = await self._fetch_and_filter_meme()
                 if meme:
-                    await self._post_meme_to_channel(channel, meme)
+                    try:
+                        await self._post_meme_to_channel(channel, meme)
+                    except discord.HTTPException as e:
+                        if e.status == 429:  # Rate limit
+                            logger.warning(
+                                f"Rate limit hit in meme posting task. "
+                                f"Retry after: {e.retry_after}s. "
+                                f"Skipping this interval."
+                            )
+                            # Let the rate limit tracker handle this
+                            await self.bot.rate_limit_tracker.handle_rate_limit(e)
+                        else:
+                            raise
+                else:
+                    logger.warning("No suitable meme found to post")
                 
+        except asyncio.TimeoutError:
+            logger.error("Timeout in meme posting task")
         except Exception as e:
             logger.error(f"Error in meme posting loop: {e}")
-        finally:
-            self.is_posting = False
 
     @post_meme.before_loop
     async def before_post_meme(self):
         await self.bot.wait_until_ready()
+        logger.info("Meme posting task ready to start")
 
     @app_commands.command(
         name="kruzmemes",
@@ -418,55 +428,105 @@ class MemesCog(commands.Cog):
             raise
 
     async def _fetch_and_filter_meme(self) -> Optional[Any]:
-        """Fetch and filter memes from Reddit"""
+        """Fetch and filter memes from Reddit with rate limit handling"""
         safe_subreddits = ['meme']
-        try:
-            subreddit = await self.reddit.subreddit(random.choice(safe_subreddits))
-            memes: List[Any] = []
-            
-            async with async_timeout.timeout(30):
-                async for meme in subreddit.top(time_filter='day', limit=100):
-                    if len(memes) >= 25:
-                        break
-                    if self._is_valid_meme(meme):
-                        memes.append(meme)
-                        
-            if not memes:
-                logger.warning("No valid memes found")
-                return None
+        max_retries = 3
+        base_delay = 5.0
+        
+        for attempt in range(max_retries):
+            try:
+                subreddit = await self.reddit.subreddit(random.choice(safe_subreddits))
+                memes: List[Any] = []
                 
-            return random.choice(memes)
-            
-        except asyncio.TimeoutError:
-            logger.error("Timeout while fetching memes from Reddit")
-        except Exception as e:
-            logger.error(f"Error fetching memes: {e}")
+                async with async_timeout.timeout(30):
+                    async for meme in subreddit.top(time_filter='day', limit=100):
+                        if len(memes) >= 25:
+                            break
+                        if self._is_valid_meme(meme):
+                            memes.append(meme)
+                            
+                if not memes:
+                    logger.warning("No valid memes found")
+                    return None
+                    
+                return random.choice(memes)
+                
+            except asyncio.TimeoutError:
+                logger.error("Timeout while fetching memes from Reddit")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(base_delay * (2 ** attempt))
+                    continue
+            except Exception as e:
+                if hasattr(e, 'response') and getattr(e.response, 'status', None) == 429:
+                    if attempt == max_retries - 1:
+                        logger.error("Max retries reached for Reddit API after rate limit")
+                        return None
+                        
+                    retry_after = float(getattr(e.response, 'headers', {}).get('Retry-After', base_delay))
+                    delay = min(base_delay * (2 ** attempt) + retry_after, 300)  # Cap at 5 minutes
+                    
+                    logger.warning(f"Rate limited by Reddit API. Attempt {attempt + 1}/{max_retries}. "
+                                 f"Waiting {delay}s before retry")
+                    
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Error fetching memes: {e}")
+                    return None
         return None
 
     async def _post_meme_to_channel(self, channel: discord.TextChannel, meme: Any) -> None:
-        """Post meme to Discord channel"""
-        try:
-            embed = discord.Embed(
-                title=meme.title,
-                url=f"https://reddit.com{meme.permalink}",
-                color=int(BOT_SETTINGS["embed_color"], 16)
-            )
-            embed.set_image(url=meme.url)
-            embed.set_footer(text="See the top new memes on reddit!")
-            
-            await channel.send(embed=embed)
-            self.posted_memes.add(meme.id)
-            
-            # Trim posted memes if needed
-            if len(self.posted_memes) >= self.max_stored_memes:
-                self.posted_memes = set(list(self.posted_memes)[-self.max_stored_memes:])
-            
-            self.save_settings()
-            logger.info(f"Successfully posted meme: {meme.id}")
-            
-        except Exception as e:
-            logger.error(f"Error posting meme: {e}")
-            raise
+        """Post meme to Discord channel with rate limit handling"""
+        max_retries = 3
+        base_delay = 5.0
+        route = f"channels/{channel.id}/messages"
+        
+        for attempt in range(max_retries):
+            try:
+                # Check rate limits before sending
+                await self.bot.rate_limit_tracker.before_request(route)
+                
+                embed = discord.Embed(
+                    title=meme.title,
+                    url=f"https://reddit.com{meme.permalink}",
+                    color=int(BOT_SETTINGS["embed_color"], 16)
+                )
+                embed.set_image(url=meme.url)
+                embed.set_footer(text="See the top new memes on reddit!")
+                
+                message = await channel.send(embed=embed)
+                
+                # Update rate limit tracking from response
+                if hasattr(message, '_response'):
+                    self.bot.rate_limit_tracker.update_bucket(
+                        message._response.headers,
+                        route
+                    )
+                
+                self.posted_memes.add(meme.id)
+                
+                # Trim posted memes if needed
+                if len(self.posted_memes) >= self.max_stored_memes:
+                    self.posted_memes = set(list(self.posted_memes)[-self.max_stored_memes:])
+                
+                self.save_settings()
+                logger.info(f"Successfully posted meme: {meme.id}")
+                return
+                
+            except discord.HTTPException as e:
+                if e.status == 429:  # Rate limit
+                    if attempt == max_retries - 1:
+                        logger.error("Max retries reached for meme post after rate limit")
+                        raise
+                    
+                    # Update rate limit tracking
+                    await self.bot.rate_limit_tracker.handle_rate_limit(e)
+                    continue
+                else:
+                    logger.error(f"HTTP error posting meme: {e}")
+                    raise
+            except Exception as e:
+                logger.error(f"Error posting meme: {e}")
+                raise
 
     async def _start_meme_task(self):
         """Helper method to start meme task after bot is ready"""

@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from config import GUILD_ID, BOT_SETTINGS, FREESTUFF_API_KEY
 import time
+import asyncio
 
 logger = logging.getLogger(__name__)
 GUILD = discord.Object(id=GUILD_ID)
@@ -394,7 +395,7 @@ class FreeGames(commands.Cog):
         
         return embed
 
-    @tasks.loop(minutes=15)
+    @tasks.loop(minutes=30)
     async def announce_games(self) -> None:
         """Check for and announce new free games"""
         if not self.session or not self.api_key:
@@ -471,9 +472,31 @@ class FreeGames(commands.Cog):
                     if str(game.get("id")) not in announced:
                         try:
                             embed = self._create_game_embed(game)
-                            content = "@everyone" if filters.get("notify_roles") else None
-                            await channel.send(content=content, embed=embed)
-                            announced.append(str(game.get("id")))
+                            
+                            # Get role mentions for notification
+                            notify_roles = filters.get("notify_roles", [])
+                            role_mentions = []
+                            for role_id in notify_roles:
+                                if role_id != "everyone":  # Skip @everyone
+                                    try:
+                                        role = channel.guild.get_role(int(role_id))
+                                        if role and role.mentionable:
+                                            role_mentions.append(role.mention)
+                                    except (ValueError, AttributeError):
+                                        continue
+                            
+                            # Join role mentions with spaces
+                            content = " ".join(role_mentions) if role_mentions else None
+                            
+                            # Use the new _post_announcement method with rate limit handling
+                            if await self._post_announcement(channel, content, embed):
+                                announced.append(str(game.get("id")))
+                            else:
+                                logger.error(f"Failed to announce game {game.get('id')} after retries")
+                                
+                            # Add delay between announcements to avoid rate limits
+                            await asyncio.sleep(2.0)
+                            
                         except Exception as e:
                             logger.error(f"Error announcing game {game.get('id')}: {e}")
             
@@ -534,21 +557,86 @@ class FreeGames(commands.Cog):
     async def _make_api_request(self, url: str, headers: Dict[str, str], timeout: int = 10) -> Optional[Dict]:
         """Make an API request with proper error handling"""
         try:
+            # Check rate limits before making request
+            route = url.split('/')[-1]  # Use endpoint as route
+            await self.bot.rate_limit_tracker.before_request(route)
+            
             async with self.session.get(url, headers=headers, timeout=timeout) as resp:
+                # Update rate limit tracking from response headers
+                self.bot.rate_limit_tracker.update_bucket(resp.headers, route)
+                
                 if resp.status == 429:  # Rate limit
-                    retry_after = int(resp.headers.get('Retry-After', 60))
-                    logger.info(f"Rate limited, retry after {retry_after} seconds")
-                    return None
+                    retry_after = float(resp.headers.get('Retry-After', 60))
+                    is_global = resp.headers.get('X-RateLimit-Global', 'false').lower() == 'true'
+                    scope = resp.headers.get('X-RateLimit-Scope', 'user')
+                    bucket = resp.headers.get('X-RateLimit-Bucket')
+                    
+                    logger.warning(
+                        f"Rate limited on {url} "
+                        f"(scope: {scope}, {'global' if is_global else f'bucket: {bucket}'}) "
+                        f"retry after {retry_after}s"
+                    )
+                    
+                    # Use exponential backoff
+                    backoff_retry = min(retry_after * 1.5, 300)  # Cap at 5 minutes
+                    await asyncio.sleep(backoff_retry)
+                    
+                    # Retry the request recursively
+                    return await self._make_api_request(url, headers, timeout)
                 
                 if resp.status != 200:
                     error_text = await resp.text()
                     logger.error(f"API request failed: {resp.status} - {error_text}")
                     return None
-                    
+                
                 return await resp.json()
-        except Exception as e:
-            logger.error(f"API request error: {e}")
+                
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout while requesting {url}")
             return None
+        except Exception as e:
+            logger.error(f"API request error for {url}: {e}")
+            return None
+
+    async def _post_announcement(self, channel: discord.TextChannel, content: Optional[str], embed: discord.Embed) -> bool:
+        """Post announcement with rate limit handling"""
+        max_retries = 3
+        base_delay = 5.0
+        route = f"channels/{channel.id}/messages"
+        
+        for attempt in range(max_retries):
+            try:
+                # Check rate limits before sending
+                await self.bot.rate_limit_tracker.before_request(route)
+                
+                message = await channel.send(content=content, embed=embed)
+                
+                # Update rate limit tracking from response
+                if hasattr(message, '_response'):
+                    self.bot.rate_limit_tracker.update_bucket(
+                        message._response.headers,
+                        route
+                    )
+                
+                return True
+                
+            except discord.HTTPException as e:
+                if e.status == 429:  # Rate limit
+                    if attempt == max_retries - 1:
+                        logger.error(f"Max retries reached for announcement after rate limit")
+                        return False
+                    
+                    # Update rate limit tracking
+                    await self.bot.rate_limit_tracker.handle_rate_limit(e)
+                    continue
+                else:
+                    logger.error(f"HTTP error posting announcement: {e}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error posting announcement: {e}")
+                return False
+        
+        return False
 
     async def _get_game_details(self, game_id: str, headers: Dict[str, str]) -> Optional[Dict]:
         """Fetch details for a specific game"""
