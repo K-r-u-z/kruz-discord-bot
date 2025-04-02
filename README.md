@@ -35,6 +35,52 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - Message purging commands
 - More moderation features planned
 
+### AutoMod System
+- **Spam Protection**
+  - Configurable message limits and time windows
+  - Multiple punishment options (delete, warn, mute, ban)
+  - Warning system with configurable limits before ban
+  - Bulk message deletion for spam handling
+  - Rate limit protection
+
+- **Advertising Protection**
+  - Block Discord invites
+  - Block URLs
+  - Configurable punishments
+  - Whitelist support for trusted links
+
+- **Text Filter**
+  - Custom banned words list
+  - Multiple punishment options
+  - Whitelist support for trusted users/roles
+
+- **Caps Filter**
+  - Configurable caps threshold
+  - Minimum message length requirement
+  - Multiple punishment options
+
+- **Emoji Spam Protection**
+  - Configurable emoji limits
+  - Multiple punishment options
+
+- **Whitelist System**
+  - Role-based whitelist
+  - Channel-based whitelist
+  - Easy management through commands
+
+- **Warning System**
+  - Configurable warning limits before ban
+  - Warning tracking per user
+  - Warning reset command for admins
+  - Warning check command
+  - Automatic ban after warning limit reached
+
+- **Logging System**
+  - Detailed violation logging
+  - Configurable log channel
+  - Violation history tracking
+  - Action confirmation messages
+
 ## Commands
 
 ### Welcome Message Commands
@@ -101,6 +147,24 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
   - `🔄 Toggle` - Enable/Disable announcements
   - `⚙️ Settings` - Configure filters and notifications
   - `🧪 Test` - Send test announcement
+
+### AutoMod Commands
+- `/automod` - Open AutoMod settings menu
+  - Spam Settings
+    - Max messages per time window
+    - Time window duration
+    - Punishment type
+    - Warning limit before ban
+  - Advertising Settings
+    - Block Discord invites
+    - Block URLs
+    - Punishment type
+  - Text Filter Settings
+    - Banned words list
+    - Punishment type
+  - Whitelist Settings
+    - Role whitelist
+    - Channel whitelist
 
 ## Setup
 

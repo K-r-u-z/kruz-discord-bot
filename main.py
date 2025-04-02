@@ -299,7 +299,8 @@ class KruzBot(commands.Bot):
             'cogs.memes',
             'cogs.settings',
             'cogs.welcome',
-            'cogs.freegames'
+            'cogs.freegames',
+            'cogs.automod'
         ]
         
         self.guild = discord.Object(id=GUILD_ID)
@@ -312,6 +313,7 @@ class KruzBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Initialize bot extensions and sync commands"""
+        logger.info("Starting bot setup...")
         for extension in self.initial_extensions:
             try:
                 await self.load_extension(extension)
@@ -322,10 +324,17 @@ class KruzBot(commands.Bot):
 
         try:
             # Sync commands with guild
+            logger.info("Syncing commands...")
             synced = await self.tree.sync(guild=self.guild)
             logger.info(f"Synced {len(synced)} commands")
+            
+            # Log all registered commands
+            for cmd in self.tree.get_commands():
+                logger.info(f"Registered command: {cmd.name}")
+                
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
+            self._log_error("Command sync error", e)
 
     async def on_error(self, event_method: str, *args, **kwargs) -> None:
         """Handle any uncaught errors"""
