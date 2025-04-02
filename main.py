@@ -314,6 +314,8 @@ class KruzBot(commands.Bot):
     async def setup_hook(self) -> None:
         """Initialize bot extensions and sync commands"""
         logger.info("Starting bot setup...")
+        
+        # Load extensions first
         for extension in self.initial_extensions:
             try:
                 await self.load_extension(extension)
@@ -325,11 +327,33 @@ class KruzBot(commands.Bot):
         try:
             # Sync commands with guild
             logger.info("Syncing commands...")
-            synced = await self.tree.sync(guild=self.guild)
-            logger.info(f"Synced {len(synced)} commands")
             
+            # Clear existing commands first
+            self.tree.clear_commands(guild=self.guild)
+            
+            # Get all commands
+            commands = self.tree.get_commands()
+            
+            # Sync in batches to avoid rate limits
+            batch_size = 10
+            for i in range(0, len(commands), batch_size):
+                batch = commands[i:i + batch_size]
+                try:
+                    synced = await self.tree.sync(guild=self.guild)
+                    logger.info(f"Synced batch {i//batch_size + 1}: {len(synced)} commands")
+                except discord.HTTPException as e:
+                    if e.status == 429:  # Rate limit
+                        retry_after = float(e.response.headers.get('Retry-After', 60))
+                        logger.warning(f"Rate limited during command sync. Waiting {retry_after}s...")
+                        await asyncio.sleep(retry_after)
+                        # Retry this batch
+                        i -= batch_size
+                        continue
+                    else:
+                        raise e
+                        
             # Log all registered commands
-            for cmd in self.tree.get_commands():
+            for cmd in commands:
                 logger.info(f"Registered command: {cmd.name}")
                 
         except Exception as e:
@@ -481,11 +505,38 @@ class KruzBot(commands.Bot):
     async def sync(self, ctx: commands.Context) -> None:
         """Sync all slash commands"""
         try:
-            await ctx.send("Syncing commands...")
-            await self.tree.sync(guild=self.guild)
-            await ctx.send("Successfully synced slash commands!")
+            msg = await ctx.send("Syncing commands...")
+            
+            # Clear existing commands first
+            self.tree.clear_commands(guild=self.guild)
+            
+            # Get all commands
+            commands = self.tree.get_commands()
+            
+            # Sync in batches
+            batch_size = 10
+            total_synced = 0
+            
+            for i in range(0, len(commands), batch_size):
+                batch = commands[i:i + batch_size]
+                try:
+                    synced = await self.tree.sync(guild=self.guild)
+                    total_synced += len(synced)
+                    await msg.edit(content=f"Syncing commands... ({total_synced}/{len(commands)})")
+                except discord.HTTPException as e:
+                    if e.status == 429:  # Rate limit
+                        retry_after = float(e.response.headers.get('Retry-After', 60))
+                        await msg.edit(content=f"Rate limited. Waiting {retry_after}s...")
+                        await asyncio.sleep(retry_after)
+                        # Retry this batch
+                        i -= batch_size
+                        continue
+                    else:
+                        raise e
+            
+            await msg.edit(content=f"Successfully synced {total_synced} slash commands!")
         except Exception as e:
-            await ctx.send(f"Failed to sync commands: {e}")
+            await msg.edit(content=f"Failed to sync commands: {e}")
 
     async def close(self) -> None:
         """Cleanup and close the bot properly"""
