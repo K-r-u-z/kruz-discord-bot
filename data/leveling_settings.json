@@ -1,0 +1,46 @@
+{
+    "settings": {
+        "enabled": true,
+        "log_channel_id": null,
+        "min_xp": 15,
+        "max_xp": 25,
+        "xp_cooldown": 60,
+        "max_level": 420,
+        "users": {},
+        "xp_multipliers": {
+            "global": 1.0,
+            "active_until": null,
+            "channels": {},
+            "multiplier_chances": {
+                "10x": 0.001,
+                "5x": 0.005,
+                "2x": 0.02
+            },
+            "duration_chances": {
+                "30m": 0.4,
+                "1h": 0.3,
+                "6h": 0.2,
+                "12h": 0.07,
+                "24h": 0.03
+            }
+        },
+        "message_templates": {
+            "level_up": "<:levelUp:1356832610470330424> Good Job, {user.mention}, you just advanced to **__Level__** \u2192 **__{new_level}__**\n",
+            "level_up_with_reward": "<:levelUp:1356832610470330424> Good Job, {user.mention}, you just advanced to **__Level__** \u2192 **__{new_level}__** \n\u2192 You **__UNLOCKED__**  {reward}\n",
+            "multiplier_info": "\ud83c\udf89 You have an active **{amount}x** multiplier for **{duration}**!\n",
+            "next_reward": "Next reward at level {next_level}: {reward}"
+        }
+    },
+    "level_rewards": {
+        "5": ":art: Custom Nickname - Change your nickname through your profile settings",
+        "10": ":microphone: Voice Master - Create and manage your own private voice channels",
+        "15": ":loudspeaker: Join the music channel and listen to your favorite music",
+        "20": ":video_game: Create your own Clan(role) that stands out and add members",
+        "40": ":calendar: Post announcements and host your own events and activities for the server",
+        "50": ":star: Server Veteran - Special recognition and custom role",
+        "100": ":crown: Server Elite - Custom role with unique color and special permissions",
+        "200": ":trophy: Legendary Status - Custom role with special perks and recognition",
+        "300": ":star2: Supreme Status - Custom role with exclusive perks and recognition",
+        "420": ":herb: Baked Status - Custom role with legendary perks - Level 420"
+    }
+}

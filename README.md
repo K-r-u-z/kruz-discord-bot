@@ -13,12 +13,11 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### Automatic Memes
 - Automated meme posting system
-- Content filtering and word blocking (customizable)
+- Content filtering and word blocking
 - Customizable posting intervals
 
 ### Embed System
 - Create and manage embedded messages
-- Automatic embed updates when content changes (Tracks and updates existing embeds)
 - Organize embeds by categories
 - Multi-line footer support
 - Posts to current channel by default
@@ -33,63 +32,53 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 ### Moderation
 - Warning system with DM notifications
 - Message purging commands
-- More moderation features planned
 
 ### AutoMod System
-- **Spam Protection**
-  - Configurable message limits and time windows
-  - Multiple punishment options (delete, warn, mute, ban)
-  - Warning system with configurable limits before ban
-  - Bulk message deletion for spam handling
-  - Rate limit protection
+- Spam Protection
+- Advertising Protection
+- Text Filter
+- Caps Filter
+- Emoji Spam Protection
+- Warning System
 
-- **Advertising Protection**
-  - Block Discord invites
-  - Block URLs
-  - Configurable punishments
-  - Whitelist support for trusted links
+### Leveling System
+- Experience Points
+  - Message-based XP gain
+  - Configurable XP rates
+  - Cooldown system
+  - Role rewards
+- Level Progression
+  - Automatic level-up notifications
+  - Role rewards at specific levels
+  - Leaderboard system
+  - Streak system
 
-- **Text Filter**
-  - Custom banned words list
-  - Multiple punishment options
-  - Whitelist support for trusted users/roles
+### Clans System
+- Create and customize clans
+- Invite members to clans
+- Leave clans
+- Delete clans
+- Transfer clan leadership
+- View clan information
+- List all clans
+- Change clan color
+- Change clan name
 
-- **Caps Filter**
-  - Configurable caps threshold
-  - Minimum message length requirement
-  - Multiple punishment options
-
-- **Emoji Spam Protection**
-  - Configurable emoji limits
-  - Multiple punishment options
-
-- **Whitelist System**
-  - Role-based whitelist
-  - Channel-based whitelist
-  - Easy management through commands
-
-- **Warning System**
-  - Configurable warning limits before ban
-  - Warning tracking per user
-  - Warning reset command for admins
-  - Warning check command
-  - Automatic ban after warning limit reached
-
-- **Logging System**
-  - Detailed violation logging
-  - Configurable log channel
-  - Violation history tracking
-  - Action confirmation messages
+### Custom Private Voice Channels
+- Create private voice channels
+- Delete private voice channels
+- Level-based access (requires level 10)
+- Automatic category management
 
 ## Commands
 
 ### Welcome Message Commands
 - `/welcome` - Configure welcome message settings
-  - `⚙️ Setup Channel` - Set welcome message channel
+  - `📌 Setup Channel` - Set welcome message channel
   - `🔄 Toggle` - Enable/Disable welcome messages
-  - `👋 Test Welcome` - Send a test welcome message (also test the autorole feature if enabled)
+  - `👋 Test Welcome` - Send a test welcome message
   - `📝 Edit Message` - Open modal to edit welcome message
-  - `📋 Show Format` - Show available placeholders and formatting options
+  - `📋 Show Format` - Show available placeholders
 
 ### Auto-Role Commands
 - `/autorole` - Configure automatic role assignment
@@ -98,13 +87,9 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
   - `✨ Set Role` - Set role for new members
 
 ### Moderation Commands
-- `/kruzwarn` - ⚠️ Issue a warning to a user
-  - `👤 User` - The user to warn
-  - `📜 Rule` - The rule that was broken
-  - `📝 Reason` - Additional details about the warning
-
-- `/purge` - 🗑️ Delete multiple messages (1-100)
-- `/cls` - 🧹 Clear messages (defaults to 100)
+- `/kruzwarn` - Issue a warning to a user
+- `/purge` - Delete multiple messages (1-100)
+- `/cls` - Clear messages (defaults to 100)
 
 ### Settings Commands
 - `/settings` - Configure bot settings
@@ -123,22 +108,10 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 ### Embed Management
 - `/kruzembeds` - Create and manage embedded messages
   - `📝 Create/Edit` - Create or edit an embed
-    - Specify category and name
-    - Set title (optional)
-    - Add content
-    - Add footer with support for multiple lines
   - `🗑️ Delete` - Delete an embed or category
   - `📋 List All` - Show all embeds or embeds in a category
   - `📤 Post` - Post embed(s) to the current channel
-    - Post single embed or entire category
-    - Auto-updates when changes are made
-  - `🔄 Refresh All` - Refresh all tracked embeds (incase auto updates fail for some reason)
-
-  # Tips:
-- Categories help organize related embeds (rules, news, info, etc.)
-- Embeds auto-update when edited
-- Use descriptive names for easy management
-- Preview before posting with list command
+  - `🔄 Refresh All` - Refresh all tracked embeds
 
 ### Free Games Commands
 - `/freegames` - Configure free games announcements
@@ -150,21 +123,30 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 
 ### AutoMod Commands
 - `/automod` - Open AutoMod settings menu
-  - Spam Settings
-    - Max messages per time window
-    - Time window duration
-    - Punishment type
-    - Warning limit before ban
-  - Advertising Settings
-    - Block Discord invites
-    - Block URLs
-    - Punishment type
-  - Text Filter Settings
-    - Banned words list
-    - Punishment type
-  - Whitelist Settings
-    - Role whitelist
-    - Channel whitelist
+- `/warningreset` - Reset warnings for a user
+- `/warnings` - Check warnings for a user
+
+### Leveling Commands
+- `/level` - Check your current level and XP
+- `/leaderboard` - View server level rankings
+- `/levelsettings` - Configure leveling system
+- `/streak` - Check your current streak
+
+### Clan Commands
+- `/clan` - Manage clans
+  - `🏰 Create` - Create a new clan
+  - `👥 Invite` - Invite members to your clan
+  - `🚪 Leave` - Leave your current clan
+  - `🗑️ Delete` - Delete your clan
+  - `👑 Transfer` - Transfer clan leadership
+  - `ℹ️ Info` - View clan information
+  - `📋 List` - List all clans
+  - `🎨 Color` - Change clan color
+  - `📝 Name` - Change clan name
+
+### Voice Channel Commands
+- `/voice` - Manage private voice channels
+- `/voicesetup` - Set up the category for private voice channels
 
 ## Setup
 
@@ -176,8 +158,7 @@ DISCORD_GUILD_ID=your_guild_id
 REDDIT_CLIENT_ID=your_reddit_client_id
 REDDIT_CLIENT_SECRET=your_reddit_client_secret
 REDDIT_USER_AGENT=your_reddit_user_agent
-FREESTUFF_API_KEY=your_freestuff_api_key (https://docs.freestuffbot.xyz/)
-
+FREESTUFF_API_KEY=your_freestuff_api_key
 ```
 3. Install requirements: `pip install -r requirements.txt`
 4. Run: `python main.py`
@@ -209,72 +190,25 @@ Embeds support these formatting options in title and description:
 ### 🔒 Security Features
 - Environment variable configuration
 - Permission-based command access
-- Extensive content filtering
+- Content filtering
 - Input validation
 - Rate limit protection
-- Bucket-based rate limiting
-- Global rate limit handling
 
 ### 💾 Data Storage
 - JSON-based configuration files
 - Organized data directory structure
 - Memory-efficient data management
-- Automatic data cleanup
-- Periodic storage optimization
-- Rate limit state persistence
 
 ### 🔄 Error Handling
-- Comprehensive error catching
+- Error catching
 - Graceful shutdown handling
 - Connection recovery system
 - Command error feedback
-- Rate limit protection
-- Exponential backoff for rate limits
-- Automatic retry mechanisms
 
 ### 🚀 Performance
 - Efficient memory usage
-- Batched file operations
 - Command cooldowns
-- Optimized data structures
 - Asynchronous operations
-- Rate limit prevention
-- Smart request throttling
-
-### 📊 Rate Limit Management
-- Discord API rate limit tracking
-- Per-route bucket management
-- Global rate limit handling
-- Message rate limit controls (5/5s per channel)
-- Proactive rate limit prevention
-- Detailed rate limit logging
-- Automatic backoff and retry
-- Rate limit state persistence
-- Smart request queuing
-- Exponential backoff for retries
-- Route-specific rate limit tracking
-- Rate limit header parsing
-- Bucket mapping and tracking
-- Remaining request monitoring
-- Reset time tracking
-- Rate limit warning system
-
-### 📝 Logging Features
-- Detailed rate limit logging
-- Request tracking
-- Rate limit warnings
-- Bucket status updates
-- Global rate limit notifications
-- Reset time tracking
-- Request remaining counters
-- Rate limit prevention logs
-- Retry attempt logging
-- Backoff duration tracking
-- Route-specific monitoring
-- Message rate tracking
-- API response logging
-- Error state logging
-- Recovery action logging
 
 ### 📁 File Structure
 - main.py
@@ -286,6 +220,10 @@ Embeds support these formatting options in title and description:
   - settings.py
   - welcome.py
   - freegames.py
+  - leveling.py
+  - clans.py
+  - voice_channels.py
+  - automod.py
   - __init__.py
 - data/
   - bot_settings.json
@@ -294,6 +232,10 @@ Embeds support these formatting options in title and description:
   - meme_settings.json
   - freegames_settings.json
   - welcome_settings.json
+  - leveling_settings.json
+  - clans.json
+  - voice_settings.json
+  - automod_settings.json
 
 ## Requirements
 - Python 3.8+
@@ -302,3 +244,9 @@ Embeds support these formatting options in title and description:
 - asyncpraw
 - async-timeout
 - aiohttp
+
+## Installation
+1. Clone the repository
+2. Install Python dependencies: `pip install -r requirements.txt`
+3. Create a `.env` file based on `.env.example`
+4. Run the bot: `python main.py`

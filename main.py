@@ -300,7 +300,10 @@ class KruzBot(commands.Bot):
             'cogs.settings',
             'cogs.welcome',
             'cogs.freegames',
-            'cogs.automod'
+            'cogs.automod',
+            'cogs.leveling',
+            'cogs.voice_channels',
+            'cogs.clans'
         ]
         
         self.guild = discord.Object(id=GUILD_ID)
@@ -327,9 +330,6 @@ class KruzBot(commands.Bot):
         try:
             # Sync commands with guild
             logger.info("Syncing commands...")
-            
-            # Clear existing commands first
-            self.tree.clear_commands(guild=self.guild)
             
             # Get all commands
             commands = self.tree.get_commands()
@@ -507,9 +507,6 @@ class KruzBot(commands.Bot):
         try:
             msg = await ctx.send("Syncing commands...")
             
-            # Clear existing commands first
-            self.tree.clear_commands(guild=self.guild)
-            
             # Get all commands
             commands = self.tree.get_commands()
             
@@ -538,9 +535,42 @@ class KruzBot(commands.Bot):
         except Exception as e:
             await msg.edit(content=f"Failed to sync commands: {e}")
 
+    @commands.command()
+    @commands.is_owner()
+    async def reload(self, ctx: commands.Context, cog: str) -> None:
+        """Reload a specific cog"""
+        try:
+            await self.reload_extension(f'cogs.{cog}')
+            await ctx.send(f'✅ Reloaded {cog}')
+        except Exception as e:
+            await ctx.send(f'❌ Error reloading {cog}: {str(e)}')
+
     async def close(self) -> None:
         """Cleanup and close the bot properly"""
         try:
+            # Get the music cog if it exists
+            music_cog = self.get_cog('Music')
+            if music_cog:
+                # Clean up all music players
+                for guild_id, player in music_cog.players.items():
+                    try:
+                        if player.connected:
+                            await player.disconnect()
+                    except Exception as e:
+                        logger.error(f"Error disconnecting music player in guild {guild_id}: {e}")
+                
+                # Clear all player views
+                for guild_id, view in music_cog.player_views.items():
+                    try:
+                        if view.message:
+                            await view.message.delete()
+                    except discord.NotFound:
+                        pass
+                
+                # Clear the dictionaries
+                music_cog.players.clear()
+                music_cog.player_views.clear()
+            
             # Close any active sessions in cogs
             for cog in self.cogs.values():
                 if hasattr(cog, 'reddit'):
