@@ -34,28 +34,35 @@ class VoiceChannelView(discord.ui.View):
         self.delete_button.callback = self.delete_channel_callback
         self.add_item(self.delete_button)
         
+        # Add rename button
+        self.rename_button = discord.ui.Button(
+            label="Rename Channel",
+            style=discord.ButtonStyle.secondary,
+            custom_id="rename_channel",
+            disabled=True
+        )
+        self.rename_button.callback = self.rename_channel_callback
+        self.add_item(self.rename_button)
+        
         # Check if user has a channel and update button states
         self.update_button_states()
 
     def update_button_states(self):
         """Update button states based on whether user has a channel"""
         has_channel = False
-        for channel in self.user.guild.channels:
-            if isinstance(channel, discord.VoiceChannel):
-                # Check if the channel is owned by the user by checking permissions
-                if channel.permissions_for(self.user).manage_channels:
-                    has_channel = True
-                    break
+        # Check if user has a bot-created channel
+        if str(self.user.id) in self.cog.settings.get("user_channels", {}):
+            has_channel = True
         
         self.delete_button.disabled = not has_channel
+        self.rename_button.disabled = not has_channel
 
     def get_user_channel(self):
-        """Get the user's private channel"""
-        for channel in self.user.guild.channels:
-            if isinstance(channel, discord.VoiceChannel):
-                # Check if the channel is owned by the user by checking permissions
-                if channel.permissions_for(self.user).manage_channels:
-                    return channel
+        """Get the user's private channel created by the bot"""
+        # Check if user has a bot-created channel
+        if str(self.user.id) in self.cog.settings.get("user_channels", {}):
+            channel_id = self.cog.settings["user_channels"][str(self.user.id)]
+            return self.user.guild.get_channel(channel_id)
         return None
 
     async def create_channel_callback(self, interaction: discord.Interaction):
@@ -76,10 +83,10 @@ class VoiceChannelView(discord.ui.View):
             )
             return
             
-        # Check if user already has a private channel
+        # Check if user already has a bot-created private channel
         if self.get_user_channel():
             await interaction.response.send_message(
-                "You already have a private voice channel!",
+                "You already have a private voice channel created by the bot!",
                 ephemeral=True
             )
             return
@@ -107,6 +114,12 @@ class VoiceChannelView(discord.ui.View):
                 category=category,
                 overwrites=overwrites
             )
+            
+            # Store the channel ID in settings
+            if "user_channels" not in self.cog.settings:
+                self.cog.settings["user_channels"] = {}
+            self.cog.settings["user_channels"][str(interaction.user.id)] = channel.id
+            self.cog._save_settings()
             
             # Update button states
             self.update_button_states()
@@ -154,6 +167,11 @@ class VoiceChannelView(discord.ui.View):
                 ephemeral=True
             )
             
+            # Remove channel from settings
+            if str(interaction.user.id) in self.cog.settings.get("user_channels", {}):
+                del self.cog.settings["user_channels"][str(interaction.user.id)]
+                self.cog._save_settings()
+            
             # Then delete the channel
             await user_channel.delete()
             
@@ -169,6 +187,65 @@ class VoiceChannelView(discord.ui.View):
                     "An error occurred while deleting your channel.",
                     ephemeral=True
                 )
+                
+    async def rename_channel_callback(self, interaction: discord.Interaction):
+        # Get user's channel
+        user_channel = self.get_user_channel()
+        if not user_channel:
+            await interaction.response.send_message(
+                "Your private channel was not found!",
+                ephemeral=True
+            )
+            return
+        
+        # Create a modal for renaming the channel
+        class RenameModal(discord.ui.Modal, title="Rename Your Voice Channel"):
+            new_name = discord.ui.TextInput(
+                label="New Channel Name",
+                placeholder="Enter a new name for your channel",
+                required=True,
+                max_length=100
+            )
+            
+            def __init__(self, cog, view):
+                super().__init__()
+                self.cog = cog
+                self.view = view
+            
+            async def on_submit(self, interaction: discord.Interaction):
+                try:
+                    # Update the channel name
+                    await user_channel.edit(name=f"🔒 {self.new_name.value}")
+                    
+                    # Update the embed with the new channel name
+                    embed = discord.Embed(
+                        title="🎤 Voice Channel Management",
+                        description="Use the buttons below to manage your private voice channel. You can manage permissions directly through Discord's interface.",
+                        color=self.cog.embed_color
+                    )
+                    embed.add_field(
+                        name="Your Channel",
+                        value=f"{user_channel.mention}",
+                        inline=False
+                    )
+                    
+                    await interaction.response.edit_message(embed=embed, view=self.view)
+                    
+                except discord.Forbidden:
+                    await interaction.response.send_message(
+                        "I don't have permission to rename the channel. Please contact an administrator.",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    logger.error(f"Error renaming voice channel: {e}")
+                    await interaction.response.send_message(
+                        "An error occurred while renaming your channel.",
+                        ephemeral=True
+                    )
+        
+        # Show the modal to the user
+        modal = RenameModal(self.cog, self)
+        await interaction.response.send_modal(modal)
 
 class VoiceChannels(commands.Cog):
     """Cog for managing private voice channels"""
@@ -188,6 +265,11 @@ class VoiceChannels(commands.Cog):
         self.settings = self._load_settings()
         if 'category_id' in self.settings:
             self.category_id = self.settings['category_id']
+        
+        # Ensure user_channels exists in settings
+        if 'user_channels' not in self.settings:
+            self.settings['user_channels'] = {}
+            self._save_settings()
 
     def _load_settings(self) -> dict:
         """Load settings from file"""
@@ -314,16 +396,16 @@ class VoiceChannels(commands.Cog):
             color=self.embed_color
         )
         
-        # Add channel info if user has one
-        for channel in interaction.guild.channels:
-            if isinstance(channel, discord.VoiceChannel):
-                if channel.permissions_for(interaction.user).manage_channels:
-                    embed.add_field(
-                        name="Your Channel",
-                        value=f"{channel.mention}",
-                        inline=False
-                    )
-                    break
+        # Add channel info if user has a bot-created channel
+        if str(interaction.user.id) in self.settings.get("user_channels", {}):
+            channel_id = self.settings["user_channels"][str(interaction.user.id)]
+            channel = interaction.guild.get_channel(channel_id)
+            if channel:
+                embed.add_field(
+                    name="Your Channel",
+                    value=f"{channel.mention}",
+                    inline=False
+                )
         
         # Create view
         view = VoiceChannelView(self, interaction.user)

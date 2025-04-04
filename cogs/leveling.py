@@ -130,22 +130,77 @@ class RoleRewardView(discord.ui.View):
         super().__init__(timeout=120)
         self.cog = cog
         self.level = level
+        self.roles_per_page = 25
+        self.current_page = 0
+        self.all_roles = sorted(self.cog.bot.get_guild(GUILD_ID).roles, key=lambda r: r.name)
+        self.total_pages = (len(self.all_roles) - 1) // self.roles_per_page + 1
+        
+        # Add role select menu
         self.add_role_options()
+        
+        # Add navigation buttons if there are multiple pages
+        if self.total_pages > 1:
+            self.add_navigation_buttons()
 
     def add_role_options(self):
+        # Calculate start and end indices for current page
+        start_idx = self.current_page * self.roles_per_page
+        end_idx = min(start_idx + self.roles_per_page, len(self.all_roles))
+        current_roles = self.all_roles[start_idx:end_idx]
+        
+        # Create placeholder text with pagination info
+        placeholder = f"Select a role for level {self.level}"
+        if self.total_pages > 1:
+            placeholder += f" (Page {self.current_page + 1}/{self.total_pages})"
+        
         select = discord.ui.Select(
-            placeholder="Select a role for this level",
+            placeholder=placeholder,
             options=[
                 discord.SelectOption(
                     label=role.name,
                     value=str(role.id),
                     description=f"Set as reward for level {self.level}"
                 )
-                for role in sorted(self.cog.bot.get_guild(GUILD_ID).roles, key=lambda r: r.name)
+                for role in current_roles
             ]
         )
         select.callback = self.select_callback
         self.add_item(select)
+    
+    def add_navigation_buttons(self):
+        # Add previous page button
+        prev_button = discord.ui.Button(
+            label="◀️ Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.current_page == 0
+        )
+        prev_button.callback = self.prev_page_callback
+        self.add_item(prev_button)
+        
+        # Add next page button
+        next_button = discord.ui.Button(
+            label="Next ▶️",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.current_page == self.total_pages - 1
+        )
+        next_button.callback = self.next_page_callback
+        self.add_item(next_button)
+    
+    async def prev_page_callback(self, interaction: discord.Interaction):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.clear_items()
+            self.add_role_options()
+            self.add_navigation_buttons()
+            await interaction.response.edit_message(view=self)
+    
+    async def next_page_callback(self, interaction: discord.Interaction):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.clear_items()
+            self.add_role_options()
+            self.add_navigation_buttons()
+            await interaction.response.edit_message(view=self)
 
     async def select_callback(self, interaction: discord.Interaction):
         try:
@@ -242,20 +297,14 @@ class UserManagementView(discord.ui.View):
         self.selected_user = None
         self.selected_action = None
         
+        # Pagination settings
+        self.users_per_page = 25
+        self.current_page = 0
+        self.all_members = sorted(cog.bot.get_guild(GUILD_ID).members, key=lambda m: m.display_name)
+        self.total_pages = (len(self.all_members) - 1) // self.users_per_page + 1
+        
         # Create user select menu
-        self.user_select = discord.ui.Select(
-            placeholder="Select a user",
-            options=[
-                discord.SelectOption(
-                    label=member.display_name,
-                    value=str(member.id),
-                    description=f"ID: {member.id}"
-                )
-                for member in sorted(cog.bot.get_guild(GUILD_ID).members, key=lambda m: m.display_name)
-            ]
-        )
-        self.user_select.callback = self.on_user_select
-        self.add_item(self.user_select)
+        self.add_user_select()
         
         # Create action select menu
         self.action_select = discord.ui.Select(
@@ -264,27 +313,22 @@ class UserManagementView(discord.ui.View):
                 discord.SelectOption(
                     label="Add XP",
                     value="add_xp",
-                    description="Add XP to user"
+                    description="Add XP to the selected user"
                 ),
                 discord.SelectOption(
                     label="Remove XP",
                     value="remove_xp",
-                    description="Remove XP from user"
+                    description="Remove XP from the selected user"
                 ),
                 discord.SelectOption(
                     label="Set Level",
                     value="set_level",
-                    description="Set user's level directly"
-                ),
-                discord.SelectOption(
-                    label="Force Level Up",
-                    value="level_up",
-                    description="Force user to level up"
+                    description="Set the user's level directly"
                 ),
                 discord.SelectOption(
                     label="Reset User",
-                    value="reset_user",
-                    description="Reset user to level 1 and remove rewards"
+                    value="reset",
+                    description="Reset the user's level and XP"
                 )
             ]
         )
@@ -299,6 +343,74 @@ class UserManagementView(discord.ui.View):
         )
         self.amount_button.callback = self.on_amount_button
         self.add_item(self.amount_button)
+        
+        # Add navigation buttons if there are multiple pages
+        if self.total_pages > 1:
+            self.add_navigation_buttons()
+    
+    def add_user_select(self):
+        # Calculate start and end indices for current page
+        start_idx = self.current_page * self.users_per_page
+        end_idx = min(start_idx + self.users_per_page, len(self.all_members))
+        current_members = self.all_members[start_idx:end_idx]
+        
+        # Create placeholder text with pagination info
+        placeholder = "Select a user"
+        if self.total_pages > 1:
+            placeholder += f" (Page {self.current_page + 1}/{self.total_pages})"
+        
+        self.user_select = discord.ui.Select(
+            placeholder=placeholder,
+            options=[
+                discord.SelectOption(
+                    label=member.display_name,
+                    value=str(member.id),
+                    description=f"ID: {member.id}"
+                )
+                for member in current_members
+            ]
+        )
+        self.user_select.callback = self.on_user_select
+        self.add_item(self.user_select)
+    
+    def add_navigation_buttons(self):
+        # Add previous page button
+        prev_button = discord.ui.Button(
+            label="◀️ Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.current_page == 0
+        )
+        prev_button.callback = self.prev_page_callback
+        self.add_item(prev_button)
+        
+        # Add next page button
+        next_button = discord.ui.Button(
+            label="Next ▶️",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.current_page == self.total_pages - 1
+        )
+        next_button.callback = self.next_page_callback
+        self.add_item(next_button)
+    
+    async def prev_page_callback(self, interaction: discord.Interaction):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.clear_items()
+            self.add_user_select()
+            self.add_item(self.action_select)
+            self.add_item(self.amount_button)
+            self.add_navigation_buttons()
+            await interaction.response.edit_message(view=self)
+    
+    async def next_page_callback(self, interaction: discord.Interaction):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.clear_items()
+            self.add_user_select()
+            self.add_item(self.action_select)
+            self.add_item(self.amount_button)
+            self.add_navigation_buttons()
+            await interaction.response.edit_message(view=self)
 
     async def on_user_select(self, interaction: discord.Interaction):
         self.selected_user = int(self.user_select.values[0])
@@ -308,20 +420,20 @@ class UserManagementView(discord.ui.View):
         await interaction.response.edit_message(
             content=f"Selected user: {user.mention}\n"
                    f"Selected action: {self.selected_action if self.selected_action else 'None'}\n"
-                   "Click 'Enter Amount' to proceed." if self.selected_action and self.selected_action != "reset_user" else "Select an action to continue.",
+                   "Click 'Enter Amount' to proceed." if self.selected_action and self.selected_action != "reset" else "Select an action to continue.",
             view=self
         )
 
     async def on_action_select(self, interaction: discord.Interaction):
         self.selected_action = self.action_select.values[0]
-        # Enable the amount button for all actions except reset_user
+        # Enable the amount button for all actions except reset
         self.amount_button.disabled = False
         
         # Update the view with current selections
         await interaction.response.edit_message(
             content=f"Selected user: {interaction.guild.get_member(self.selected_user).mention if self.selected_user else 'None'}\n"
                    f"Selected action: {self.selected_action}\n"
-                   "Click 'Enter Amount' to proceed." if self.selected_action != "reset_user" else "Click 'Enter Amount' to confirm reset.",
+                   "Click 'Enter Amount' to proceed." if self.selected_action != "reset" else "Click 'Enter Amount' to confirm reset.",
             view=self
         )
 
@@ -333,7 +445,7 @@ class UserManagementView(discord.ui.View):
             )
             return
             
-        if self.selected_action == "reset_user":
+        if self.selected_action == "reset":
             # Handle reset directly without modal
             user = interaction.guild.get_member(self.selected_user)
             if not user:
@@ -453,20 +565,6 @@ class AmountInputModal(discord.ui.Modal, title="Enter Amount"):
                 
                 await interaction.response.send_message(
                     f"Set {user.mention}'s level to {amount}",
-                    ephemeral=True
-                )
-            
-            elif self.action == "level_up":
-                old_level = user_data["level"]
-                user_data["level"] += amount
-                user_data["xp"] = 0  # Reset XP for new level
-                
-                # Handle level up rewards
-                await self.cog._handle_level_up(user, old_level, user_data["level"])
-                await self.cog._handle_role_rewards(user.id, user_data["level"])
-                
-                await interaction.response.send_message(
-                    f"Forced {user.mention} to level up {amount} times to level {user_data['level']}",
                     ephemeral=True
                 )
             
@@ -1896,7 +1994,7 @@ class MessageTemplateModal(discord.ui.Modal, title="Edit Message Template"):
         
         self.template = discord.ui.TextInput(
             label="Message Template",
-            placeholder="Enter the message template",
+            placeholder="Enter the message template\nUse \\n for new lines\nExample:\nLine 1\\nLine 2",
             default=self.cog.settings["message_templates"][template_id],
             required=True,
             max_length=2000,
@@ -1905,7 +2003,9 @@ class MessageTemplateModal(discord.ui.Modal, title="Edit Message Template"):
         self.add_item(self.template)
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.cog.settings["message_templates"][self.template_id] = self.template.value
+        # Replace literal \n with actual newlines
+        template_value = self.template.value.replace('\\n', '\n')
+        self.cog.settings["message_templates"][self.template_id] = template_value
         self.cog._save_settings()
         await interaction.response.send_message(
             f"Updated {self.template_id.replace('_', ' ').title()} template!",
