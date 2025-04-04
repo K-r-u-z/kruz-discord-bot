@@ -4,6 +4,7 @@ from discord.ext import commands
 from typing import Optional
 import logging
 from config import GUILD_ID, BOT_SETTINGS
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,299 @@ class Moderation(commands.Cog):
                 "❌ An error occurred while purging messages",
                 ephemeral=True
             )
+
+    @app_commands.command(
+        name="ban",
+        description="🔨 Ban a user from the server"
+    )
+    @app_commands.guilds(GUILD_ID)
+    @app_commands.describe(
+        user="👤 The user to ban",
+        reason="📝 Reason for the ban"
+    )
+    @app_commands.checks.has_permissions(ban_members=True)
+    async def ban_user(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        reason: Optional[str] = None
+    ) -> None:
+        """Ban a user from the server"""
+        try:
+            # Don't allow banning bots or self
+            if user.bot:
+                await interaction.response.send_message(
+                    "Cannot ban bots!",
+                    ephemeral=True
+                )
+                return
+                
+            if user == interaction.user:
+                await interaction.response.send_message(
+                    "You cannot ban yourself!",
+                    ephemeral=True
+                )
+                return
+
+            # Create ban embed
+            ban_embed = discord.Embed(
+                title="🔨 You have been banned!",
+                description=(
+                    f"**User:** {user.mention}\n"
+                    f"**Banned By:** {interaction.user.mention}\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
+            
+            # Try to DM the user
+            try:
+                await user.send(embed=ban_embed)
+                dm_status = "Ban notification sent via DM"
+            except discord.Forbidden:
+                dm_status = "Could not DM user (DMs disabled)"
+            except Exception as e:
+                logger.error(f"Error sending ban DM: {e}")
+                dm_status = "Error sending DM"
+
+            # Ban the user
+            await user.ban(reason=reason or f"Banned by {interaction.user}")
+            
+            # Send confirmation
+            await interaction.response.send_message(
+                embed=ban_embed,
+                ephemeral=True
+            )
+            
+            # Log the ban
+            logger.info(f"{interaction.user} banned {user} for reason: {reason}")
+
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to ban users!",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error in ban command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while processing the ban.",
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="tempban",
+        description="⏳ Temporarily ban a user from the server"
+    )
+    @app_commands.guilds(GUILD_ID)
+    @app_commands.describe(
+        user="👤 The user to tempban",
+        duration="⏱️ Duration (e.g. 1d, 2h, 30m)",
+        reason="📝 Reason for the tempban"
+    )
+    @app_commands.checks.has_permissions(ban_members=True)
+    async def tempban_user(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        duration: str,
+        reason: Optional[str] = None
+    ) -> None:
+        """Temporarily ban a user from the server"""
+        try:
+            # Don't allow tempbanning bots or self
+            if user.bot:
+                await interaction.response.send_message(
+                    "Cannot tempban bots!",
+                    ephemeral=True
+                )
+                return
+                
+            if user == interaction.user:
+                await interaction.response.send_message(
+                    "You cannot tempban yourself!",
+                    ephemeral=True
+                )
+                return
+
+            # Parse duration
+            try:
+                duration_seconds = self._parse_duration(duration)
+                if duration_seconds <= 0:
+                    raise ValueError("Duration must be positive")
+            except ValueError as e:
+                await interaction.response.send_message(
+                    f"Invalid duration format: {e}\nUse format like: 1d, 2h, 30m",
+                    ephemeral=True
+                )
+                return
+
+            # Calculate unban time
+            unban_time = discord.utils.utcnow() + datetime.timedelta(seconds=duration_seconds)
+
+            # Create tempban embed
+            tempban_embed = discord.Embed(
+                title="⏳ User Tempbanned",
+                description=(
+                    f"**User:** {user.mention}\n"
+                    f"**Banned By:** {interaction.user.mention}\n"
+                    f"**Duration:** {duration}\n"
+                    f"**Unban Time:** <t:{int(unban_time.timestamp())}:R>\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
+            
+            # Try to DM the user
+            try:
+                await user.send(embed=tempban_embed)
+                dm_status = "Tempban notification sent via DM"
+            except discord.Forbidden:
+                dm_status = "Could not DM user (DMs disabled)"
+            except Exception as e:
+                logger.error(f"Error sending tempban DM: {e}")
+                dm_status = "Error sending DM"
+
+            # Ban the user
+            await user.ban(reason=f"Tempbanned by {interaction.user} for {duration}. Reason: {reason or 'No reason provided'}")
+            
+            # Schedule unban
+            self.bot.loop.create_task(self._schedule_unban(user.id, unban_time))
+            
+            # Send confirmation
+            await interaction.response.send_message(
+                embed=tempban_embed,
+                ephemeral=True
+            )
+            
+            # Log the tempban
+            logger.info(f"{interaction.user} tempbanned {user} for {duration}. Reason: {reason}")
+
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to ban users!",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error in tempban command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while processing the tempban.",
+                ephemeral=True
+            )
+
+    @app_commands.command(
+        name="unban",
+        description="🔓 Unban a user from the server"
+    )
+    @app_commands.guilds(GUILD_ID)
+    @app_commands.describe(
+        user="👤 The user to unban (ID or username#discriminator)",
+        reason="📝 Reason for the unban"
+    )
+    @app_commands.checks.has_permissions(ban_members=True)
+    async def unban_user(
+        self,
+        interaction: discord.Interaction,
+        user: str,
+        reason: Optional[str] = None
+    ) -> None:
+        """Unban a user from the server"""
+        try:
+            # Get banned users
+            banned_users = [entry async for entry in interaction.guild.bans()]
+            
+            # Try to find the user
+            user_to_unban = None
+            try:
+                # Try to parse as user ID
+                user_id = int(user)
+                user_to_unban = discord.utils.get(banned_users, user__id=user_id)
+            except ValueError:
+                # Try to parse as username#discriminator
+                for ban_entry in banned_users:
+                    if str(ban_entry.user) == user:
+                        user_to_unban = ban_entry
+                        break
+            
+            if not user_to_unban:
+                await interaction.response.send_message(
+                    f"Could not find banned user: {user}",
+                    ephemeral=True
+                )
+                return
+
+            # Unban the user
+            await interaction.guild.unban(
+                user_to_unban.user,
+                reason=f"Unbanned by {interaction.user}. Reason: {reason or 'No reason provided'}"
+            )
+            
+            # Create unban embed
+            unban_embed = discord.Embed(
+                title="🔓 User Unbanned",
+                description=(
+                    f"**User:** {user_to_unban.user.mention}\n"
+                    f"**Unbanned By:** {interaction.user.mention}\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
+            
+            # Send confirmation
+            await interaction.response.send_message(
+                embed=unban_embed,
+                ephemeral=True
+            )
+            
+            # Log the unban
+            logger.info(f"{interaction.user} unbanned {user_to_unban.user} for reason: {reason}")
+
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "I don't have permission to unban users!",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error in unban command: {e}")
+            await interaction.response.send_message(
+                "An error occurred while processing the unban.",
+                ephemeral=True
+            )
+
+    def _parse_duration(self, duration: str) -> int:
+        """Parse duration string into seconds"""
+        duration = duration.lower()
+        if duration.endswith('d'):
+            return int(duration[:-1]) * 86400
+        elif duration.endswith('h'):
+            return int(duration[:-1]) * 3600
+        elif duration.endswith('m'):
+            return int(duration[:-1]) * 60
+        else:
+            raise ValueError("Invalid duration format. Use d, h, or m")
+
+    async def _schedule_unban(self, user_id: int, unban_time: datetime.datetime) -> None:
+        """Schedule an unban for a user"""
+        try:
+            # Wait until unban time
+            await discord.utils.sleep_until(unban_time)
+            
+            # Get the guild
+            guild = self.bot.get_guild(GUILD_ID)
+            if not guild:
+                logger.error(f"Could not find guild {GUILD_ID} for unban")
+                return
+            
+            # Unban the user
+            user = await self.bot.fetch_user(user_id)
+            await guild.unban(user, reason="Temporary ban expired")
+            
+            logger.info(f"Automatically unbanned {user} after tempban expired")
+            
+        except Exception as e:
+            logger.error(f"Error in scheduled unban: {e}")
 
 async def setup(bot: commands.Bot) -> None:
     """Set up the Moderation cog"""

@@ -90,6 +90,20 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - `/kruzwarn` - Issue a warning to a user
 - `/purge` - Delete multiple messages (1-100)
 - `/cls` - Clear messages (defaults to 100)
+- `/ban` - Ban a user from the server
+  - Requires ban_members permission
+  - Optional reason parameter
+  - Sends DM notification to banned user
+- `/tempban` - Temporarily ban a user
+  - Requires ban_members permission
+  - Duration format: 1d (days), 2h (hours), 30m (minutes)
+  - Optional reason parameter
+  - Automatically unbans after duration
+  - Sends DM notification to tempbanned user
+- `/unban` - Unban a user from the server
+  - Requires ban_members permission
+  - Accepts user ID or username#discriminator
+  - Optional reason parameter
 
 ### Settings Commands
 - `/settings` - Configure bot settings
