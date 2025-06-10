@@ -28,6 +28,7 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - Customizable filters (store, price, rating)
 - Game details with thumbnails and links
 - Configurable announcement channel
+- (Uses https://freestuffbot.xyz API)
 
 ### Moderation
 - Warning system with DM notifications
@@ -167,12 +168,15 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 1. Clone repository
 2. Copy .env.example to .env and fill credentials:
 ```env
-DISCORD_TOKEN=your_discord_token
-DISCORD_GUILD_ID=your_guild_id
-REDDIT_CLIENT_ID=your_reddit_client_id
-REDDIT_CLIENT_SECRET=your_reddit_client_secret
-REDDIT_USER_AGENT=your_reddit_user_agent
-FREESTUFF_API_KEY=your_freestuff_api_key
+DISCORD_TOKEN=
+DISCORD_GUILD_ID=
+REDDIT_CLIENT_ID=
+REDDIT_CLIENT_SECRET=
+REDDIT_USER_AGENT=
+FREESTUFF_REST_API_KEY=
+FREESTUFF_PUBLIC_KEY=
+YOUR_WEBHOOK_URL=
+
 ```
 3. Install requirements: `pip install -r requirements.txt`
 4. Run: `python main.py`

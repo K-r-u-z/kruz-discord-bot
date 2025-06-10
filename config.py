@@ -42,7 +42,9 @@ REDDIT_CLIENT_SECRET = get_env_var('REDDIT_CLIENT_SECRET')
 REDDIT_USER_AGENT = get_env_var('REDDIT_USER_AGENT')
 
 # FreeStuff API Configuration
-FREESTUFF_API_KEY = get_env_var('FREESTUFF_API_KEY')
+FREESTUFF_REST_API_KEY = get_env_var('FREESTUFF_REST_API_KEY')
+FREESTUFF_PUBLIC_KEY = get_env_var('FREESTUFF_PUBLIC_KEY')
+YOUR_WEBHOOK_URL = get_env_var('YOUR_WEBHOOK_URL')
 
 def _get_default_settings() -> Dict[str, Any]:
     """Return default bot settings"""
@@ -110,9 +112,10 @@ def validate_env_vars():
         'REDDIT_CLIENT_ID': REDDIT_CLIENT_ID,
         'REDDIT_CLIENT_SECRET': REDDIT_CLIENT_SECRET,
         'REDDIT_USER_AGENT': REDDIT_USER_AGENT,
-        'FREESTUFF_API_KEY': FREESTUFF_API_KEY
+        'FREESTUFF_REST_API_KEY': FREESTUFF_REST_API_KEY,
+        'FREESTUFF_PUBLIC_KEY': FREESTUFF_PUBLIC_KEY,
+        'YOUR_WEBHOOK_URL': YOUR_WEBHOOK_URL
     }
-    
     missing = [k for k, v in required_vars.items() if not v]
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")

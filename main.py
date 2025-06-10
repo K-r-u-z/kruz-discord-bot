@@ -267,7 +267,6 @@ class RateLimitTracker:
 
     async def before_request(self, route: str) -> bool:
         """Check rate limits before making a request"""
-        logger.info(f"Checking Discord rate limits for: {route}")
         should_proceed, wait_time = self.should_retry(route)
         if not should_proceed:
             logger.warning(
@@ -288,9 +287,9 @@ class KruzBot(commands.Bot):
         super().__init__(
             command_prefix='!',
             intents=intents,
-            help_command=None,  # Disable default help command
-            reconnect=True,  # Enable auto-reconnect
-            max_messages=10000  # Increase message cache to help with latency
+            help_command=None,
+            reconnect=True,
+            max_messages=10000
         )
         
         self.initial_extensions: List[str] = [
@@ -318,7 +317,7 @@ class KruzBot(commands.Bot):
         """Initialize bot extensions and sync commands"""
         logger.info("Starting bot setup...")
         
-        # Load extensions first
+        # Load extensions
         for extension in self.initial_extensions:
             try:
                 await self.load_extension(extension)
@@ -330,8 +329,6 @@ class KruzBot(commands.Bot):
         try:
             # Sync commands with guild
             logger.info("Syncing commands...")
-            
-            # Get all commands
             commands = self.tree.get_commands()
             
             # Sync in batches to avoid rate limits
@@ -359,6 +356,45 @@ class KruzBot(commands.Bot):
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
             self._log_error("Command sync error", e)
+
+    async def close(self) -> None:
+        """Cleanup and close the bot properly"""
+        try:
+            # Get the music cog if it exists
+            music_cog = self.get_cog('Music')
+            if music_cog:
+                # Clean up all music players
+                for guild_id, player in music_cog.players.items():
+                    try:
+                        if player and player.connected:
+                            await player.disconnect()
+                    except Exception as e:
+                        logger.error(f"Error disconnecting music player in guild {guild_id}: {e}")
+                
+                # Clear all player views
+                for guild_id, view in music_cog.player_views.items():
+                    try:
+                        if view and view.message:
+                            await view.message.delete()
+                    except discord.NotFound:
+                        pass
+                
+                # Clear the dictionaries
+                music_cog.players.clear()
+                music_cog.player_views.clear()
+            
+            # Close any active sessions in cogs
+            for cog in self.cogs.values():
+                if hasattr(cog, 'reddit') and cog.reddit is not None:
+                    await cog.reddit.close()
+                if hasattr(cog, 'session') and cog.session is not None:
+                    await cog.session.close()
+            
+            # Call parent close
+            await super().close()
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
 
     async def on_error(self, event_method: str, *args, **kwargs) -> None:
         """Handle any uncaught errors"""
@@ -545,44 +581,9 @@ class KruzBot(commands.Bot):
         except Exception as e:
             await ctx.send(f'❌ Error reloading {cog}: {str(e)}')
 
-    async def close(self) -> None:
-        """Cleanup and close the bot properly"""
-        try:
-            # Get the music cog if it exists
-            music_cog = self.get_cog('Music')
-            if music_cog:
-                # Clean up all music players
-                for guild_id, player in music_cog.players.items():
-                    try:
-                        if player.connected:
-                            await player.disconnect()
-                    except Exception as e:
-                        logger.error(f"Error disconnecting music player in guild {guild_id}: {e}")
-                
-                # Clear all player views
-                for guild_id, view in music_cog.player_views.items():
-                    try:
-                        if view.message:
-                            await view.message.delete()
-                    except discord.NotFound:
-                        pass
-                
-                # Clear the dictionaries
-                music_cog.players.clear()
-                music_cog.player_views.clear()
-            
-            # Close any active sessions in cogs
-            for cog in self.cogs.values():
-                if hasattr(cog, 'reddit'):
-                    await cog.reddit.close()
-                if hasattr(cog, 'session'):
-                    await cog.session.close()
-            
-            # Call parent close
-            await super().close()
-            
-        except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+    async def start(self, *args, **kwargs) -> None:
+        """Start the bot"""
+        await super().start(*args, **kwargs)
 
 async def main():
     """Main entry point"""

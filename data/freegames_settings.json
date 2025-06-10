@@ -7,7 +7,7 @@
     "filters": {
         "min_rating": 0,
         "min_price": 0,
-        "currency": "EUR",
+        "currency": "USD",
         "stores": [
             "steam",
             "epic",
@@ -18,6 +18,11 @@
             "uplay",
             "battlenet"
         ],
-        "notify_roles": []
-    }
+        "notify_roles": [
+            "1340828266902196336"
+        ]
+    },
+    "processed_requests": [
+        "8af80c20-f5f9-49b2-aafc-e0e5471ad124"
+    ]
 }

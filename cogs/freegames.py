@@ -7,9 +7,9 @@ import json
 import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from config import GUILD_ID, BOT_SETTINGS, FREESTUFF_API_KEY
+from config import GUILD_ID, BOT_SETTINGS, FREESTUFF_REST_API_KEY, FREESTUFF_PUBLIC_KEY, YOUR_WEBHOOK_URL
 import time
-import asyncio
+import re
 
 logger = logging.getLogger(__name__)
 GUILD = discord.Object(id=GUILD_ID)
@@ -49,7 +49,7 @@ DEFAULT_SETTINGS = {
     "filters": {
         "min_rating": 0,  # Minimum rating to announce (0-10)
         "min_price": 0,   # Minimum original price to announce
-        "currency": "EUR",  # Default currency
+        "currency": "USD",  # Default currency
         "stores": ["steam", "epic", "gog", "humble", "itch", "origin", "uplay", "battlenet"],  # Enabled stores
         "notify_roles": []  # List of role IDs to ping
     }
@@ -111,19 +111,7 @@ class FreeGamesSettingsView(BaseSettingsView):
     @discord.ui.button(label="📋 List Free Games", style=discord.ButtonStyle.primary)
     async def list_games(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            if not self.cog.cached_games:
-                await interaction.response.edit_message(
-                    content="No free games found at the moment!",
-                    embed=None,
-                    view=self
-                )
-                return
-
-            # Show first game and add navigation buttons
-            self.current_game_index = 0
-            embed = self.cog._create_game_embed(self.cog.cached_games[0])
-            view = GameListView(self.cog, self.cog.cached_games, self)
-            await interaction.response.edit_message(embed=embed, view=view)
+            await self.cog.show_free_games(interaction)
         except Exception as e:
             logger.error(f"Error listing free games: {e}")
             await interaction.response.edit_message(
@@ -146,14 +134,32 @@ class FreeGamesSettingsView(BaseSettingsView):
                 )
                 return
             
+            # Check if bot has permissions
+            if not channel.permissions_for(channel.guild.me).send_messages:
+                await interaction.response.send_message(
+                    f"❌ I don't have permission to send messages in {channel.mention}! Please grant me the 'Send Messages' permission.",
+                    ephemeral=True
+                )
+                return
+            
+            # Verify we can actually send a message
+            try:
+                test_message = await channel.send("Testing channel access...", delete_after=1)
+                await test_message.delete()
+            except Exception as e:
+                await interaction.response.send_message(
+                    f"❌ Failed to verify channel access: {str(e)}",
+                    ephemeral=True
+                )
+                return
+            
             self.cog.settings.update({
                 "channel_id": channel.id,
                 "enabled": True
             })
             self.cog._save_settings()
             
-            if not self.cog.announce_games.is_running():
-                self.cog.announce_games.start()
+            logger.info(f"Set free games announcement channel to {channel.name} ({channel.id})")
             
             await interaction.response.edit_message(
                 content=f"✅ Free games announcements will now be sent to {channel.mention}!",
@@ -162,7 +168,7 @@ class FreeGamesSettingsView(BaseSettingsView):
         except Exception as e:
             logger.error(f"Error in setup channel: {e}")
             await interaction.response.send_message(
-                "Failed to setup channel!",
+                f"Failed to setup channel: {str(e)}",
                 ephemeral=True
             )
 
@@ -179,54 +185,9 @@ class FreeGamesSettingsView(BaseSettingsView):
         self.cog.settings["enabled"] = not current_state
         self.cog._save_settings()
         
-        if not current_state:
-            self.cog.announce_games.start()
-        else:
-            self.cog.announce_games.cancel()
-            
+        logger.info(f"Free games announcements toggled to {'ENABLED' if not current_state else 'DISABLED'} by {interaction.user} ({interaction.user.id})")
         await interaction.response.send_message(
             f"Free games announcements {'enabled' if not current_state else 'disabled'}!",
-            ephemeral=True
-        )
-
-    @discord.ui.button(label="🧪 Test", style=discord.ButtonStyle.secondary)
-    async def test(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.cog.settings.get("channel_id"):
-            await interaction.response.send_message(
-                "Please set up a channel first!",
-                ephemeral=True
-            )
-            return
-        
-        channel = interaction.guild.get_channel(self.cog.settings["channel_id"])
-        if not channel:
-            await interaction.response.send_message(
-                "Announcement channel not found! Please setup the channel again.",
-                ephemeral=True
-            )
-            return
-        
-        test_game = {
-            "title": "Test Game",
-            "store": "steam",
-            "org_price": {"dollar": 19.99},
-            "urls": {"default": "https://store.steampowered.com"},
-            "description": "This is a test announcement to verify your settings.",
-            "thumbnail": {
-                "org": "https://cdn.discordapp.com/emojis/1073161249006821406.webp",
-                "blank": "https://cdn.discordapp.com/emojis/1073161249006821406.webp",
-                "full": "https://cdn.discordapp.com/emojis/1073161249006821406.webp",
-                "tags": "https://cdn.discordapp.com/emojis/1073161249006821406.webp"
-            },
-            "rating": 0.95,
-            "until": int(datetime.now().timestamp()) + 86400,
-            "copyright": "Test Publisher",
-            "worth": 19.99
-        }
-        embed = self.cog._create_game_embed(test_game)
-        await channel.send(embed=embed)
-        await interaction.response.send_message(
-            "Test message sent!",
             ephemeral=True
         )
 
@@ -269,8 +230,140 @@ class GameListView(BaseSettingsView):
         await interaction.response.edit_message(embed=embed, view=self)
         return True
 
+class GameButtonsView(discord.ui.View):
+    def __init__(self, urls: List[Dict[str, Any]], store_name: str):
+        super().__init__(timeout=None)  # No timeout for persistent buttons
+        
+        # Add browser button
+        browser_url = next((url.get("url") for url in urls if url.get("type") == "browser"), None)
+        if browser_url:
+            self.add_item(discord.ui.Button(
+                label=f"View on {store_name}",
+                url=browser_url,
+                style=discord.ButtonStyle.link
+            ))
+        
+        # Add client button
+        client_url = next((url.get("url") for url in urls if url.get("type") == "client"), None)
+        if client_url:
+            self.add_item(discord.ui.Button(
+                label=f"Open in {store_name} Client",
+                url=client_url,
+                style=discord.ButtonStyle.link
+            ))
+
+    def _create_game_embed(self, product: Dict[str, Any]) -> discord.Embed:
+        """Create embed for game announcement"""
+        store = product.get("store", "").lower()
+        store_name = STORE_DISPLAY_NAMES.get(store, store.title())
+        store_icon = STORE_ICONS.get(store)
+        
+        # Get price from the first price entry
+        price = product.get("prices", [{}])[0].get("dollar", 0)
+        original_price = self._format_price(price)
+
+        # Create description with proper formatting
+        description = (
+            f"> {product.get('description', 'No description available.')}\n\n"
+        )
+
+        # Add price and rating on the same line, spaced with em space
+        price_line = f"~~{original_price}~~ **Free** until {datetime.fromtimestamp(product.get('until', 0)/1000).strftime('%m/%d/%Y')}"
+        if rating := product.get("rating"):
+            price_line += f"\u2003★ {rating * 10:.1f}/10"  # \u2003 is an em space
+        description += price_line
+
+        # Add clickable markdown links for browser/client, bolded and spaced far apart
+        urls = product.get("urls", [])
+        main_url = urls[0]["url"] if urls else None
+        client_url = None
+        if main_url and store == "steam":
+            match = re.search(r'(?:app|a)/(\d+)', main_url)
+            if match:
+                app_id = match.group(1)
+                client_url = f"https://freestuffbot.xyz/ext/open-client/steam/{app_id}"
+
+        # Add links inline, bolded, and spaced with em spaces
+        description += "\n\n"
+        links = []
+        if main_url:
+            links.append(f"**[View on {store_name} ↗]({main_url})**")
+        if client_url:
+            links.append(f"**[Open in {store_name} Client ↗]({client_url})**")
+        if links:
+            description += f"\u2003\u2003".join(links)  # Two em spaces between links
+
+        # Get the first image URL from the images array
+        if "images" in product and product["images"]:
+            sorted_images = sorted(product["images"], key=lambda x: x.get("priority", 0), reverse=True)
+            image_url = sorted_images[0].get("url")
+        else:
+            image_url = None
+
+        embed = discord.Embed(
+            title=product.get("title"),
+            description=description,
+            color=self.embed_color,
+            url=main_url or ""
+        )
+        
+        if store_icon:
+            embed.set_thumbnail(url=store_icon)
+        
+        # Set game image
+        if image_url:
+            embed.set_image(url=image_url)
+        
+        # Add tags below the image as a bolded line of inline code, no label
+        tags = product.get("tags", [])
+        if tags:
+            tags_str = " ".join(f"`{tag}`" for tag in tags)
+            embed.add_field(name="\u200b", value=f"**{tags_str}**", inline=False)
+        
+        publisher = product.get("copyright")
+        if publisher:
+            embed.set_footer(text=f"©️ {publisher}")
+
+        return embed
+
+    async def _post_announcement(self, channel: discord.TextChannel, content: Optional[str], embed: discord.Embed, product: Dict[str, Any]) -> bool:
+        """Post announcement with rate limit handling"""
+        max_retries = 3
+        base_delay = 5.0
+        route = f"channels/{channel.id}/messages"
+        
+        for attempt in range(max_retries):
+            try:
+                await self.bot.rate_limit_tracker.before_request(route)
+                message = await channel.send(content=content, embed=embed)
+                
+                if hasattr(message, '_response'):
+                    self.bot.rate_limit_tracker.update_bucket(
+                        message._response.headers,
+                        route
+                    )
+                
+                return True
+                
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Max retries reached for announcement after rate limit")
+                        return False
+                    
+                    await self.bot.rate_limit_tracker.handle_rate_limit(e)
+                    continue
+                else:
+                    logger.error(f"HTTP error posting announcement: {e}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error posting announcement: {e}")
+                return False
+
+        return False
+
 class FreeGames(commands.Cog):
-    """Cog for announcing free games using FreeStuff API"""
+    """Cog for announcing free games using FreeStuff API v2"""
     
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -278,12 +371,12 @@ class FreeGames(commands.Cog):
         self.embed_color = int(BOT_SETTINGS["embed_color"], 16)
         self.settings = self._load_settings()
         self.session: Optional[aiohttp.ClientSession] = None
-        self.api_key = FREESTUFF_API_KEY
+        self.api_key = FREESTUFF_REST_API_KEY
         self.cached_games = self.settings.get("cached_games", [])
+        self.processed_requests = set(self.settings.get("processed_requests", []))
         
-        # Start announcement task if enabled
-        if self.settings.get("enabled", False):
-            self.announce_games.start()
+        # No need to start announcement task since we're using webhooks
+        # The webhook handler is registered in cog_load
 
     def _load_settings(self) -> Dict[str, Any]:
         """Load free games settings from file"""
@@ -306,7 +399,7 @@ class FreeGames(commands.Cog):
                 "channel_id": None,
                 "announced_games": [],
                 "webhook_secret": None,
-                "cached_games": [],  # Make sure this is included
+                "cached_games": [],
                 "filters": DEFAULT_SETTINGS["filters"]
             }
             
@@ -325,196 +418,405 @@ class FreeGames(commands.Cog):
     def _save_settings(self) -> None:
         """Save settings to file"""
         try:
+            # Convert processed_requests set to list for JSON serialization
+            self.settings["processed_requests"] = list(self.processed_requests)
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, indent=4, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error saving free games settings: {e}")
 
-    async def cog_load(self) -> None:
-        """Initialize aiohttp session when cog loads"""
-        self.session = aiohttp.ClientSession()
+    @tasks.loop(minutes=1)
+    async def webhook_check(self) -> None:
+        """Check for new webhook data every minute"""
+        try:
+            if not self.webhook_url:
+                logger.error("Webhook URL not configured")
+                return
 
-    async def cog_unload(self) -> None:
-        """Cleanup when cog unloads"""
-        if self.session:
-            await self.session.close()
-        if self.announce_games.is_running():
-            self.announce_games.cancel()
+            # Extract token from webhook URL
+            token = self.webhook_url.split('/')[-1]
+            if not token:
+                logger.error("Invalid webhook URL format")
+                return
+            
+            # Get webhook data with increased limit to catch multiple new requests
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://webhook.site/token/{token}/requests?sorting=newest&page=1&per_page=10") as response:
+                    if response.status != 200:
+                        logger.error(f"Failed to fetch webhook data: {response.status}")
+                        return
+
+                    data = await response.json()
+                    if not data or "data" not in data or not data["data"]:
+                        return
+
+                    # Process all requests in reverse order (oldest first)
+                    for request in reversed(data["data"]):
+                        request_id = request.get("uuid")
+                        
+                        # Check if we've already processed this request
+                        if request_id in self.processed_requests:
+                            continue
+
+                        # Parse the content
+                        try:
+                            payload = json.loads(request["content"])
+                        except json.JSONDecodeError:
+                            logger.error("Invalid JSON in webhook payload")
+                            continue
+
+                        # Check if it's a test message from webhook.site
+                        if "Webhook-Id" in request["headers"] and "Webhook-Timestamp" in request["headers"]:
+                            # Process test message as a ping event
+                            test_payload = {
+                                "type": "fsb:event:ping",
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "data": {
+                                    "manual": True,
+                                    "test": True,
+                                    "webhook_id": request["headers"]["Webhook-Id"]
+                                }
+                            }
+                            await self.handle_webhook(test_payload)
+                            self.processed_requests.add(request_id)
+                            self._save_settings()  # Save after adding new request ID
+                            continue
+
+                        # Process the webhook
+                        event_type = payload.get("type")
+                        if not event_type:
+                            logger.error("No event type found in payload")
+                            continue
+
+                        await self.handle_webhook(payload)
+                        self.processed_requests.add(request_id)
+                        self._save_settings()  # Save after adding new request ID
+
+                    # Keep the set of processed requests from getting too large
+                    if len(self.processed_requests) > 1000:
+                        self.processed_requests.clear()
+                        self._save_settings()  # Save after clearing
+
+        except Exception as e:
+            logger.error(f"Error in webhook check: {e}")
+
+    @webhook_check.before_loop
+    async def before_webhook_check(self):
+        """Wait for bot to be ready before starting webhook check"""
+        await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Handle incoming webhook messages"""
+        # Check if this is a webhook message from FreeStuff
+        if not message.webhook_id:
+            return
+
+        try:
+            # Get the webhook data from the message
+            data = {
+                "Webhook-Id": message.webhook_id,
+                "Webhook-Timestamp": message.created_at.isoformat(),
+                "Webhook-Signature": message.author.name,  # FreeStuff puts the signature in the author name
+                "X-Compatibility-Date": message.author.discriminator,  # FreeStuff puts the compatibility date in the discriminator
+                "payload": message.content  # The actual webhook payload is in the message content
+            }
+
+            # Process the webhook
+            await self.handle_webhook(data)
+
+        except Exception as e:
+            logger.error(f"Error processing webhook message: {e}")
+
+    async def handle_webhook(self, payload: Dict[str, Any]) -> None:
+        """Handle incoming webhook data"""
+        try:
+            # Ignore if payload is not a dict or doesn't have required fields
+            if not isinstance(payload, dict) or "type" not in payload:
+                return
+
+            event_type = payload.get("type")
+            if not event_type:
+                return
+
+            if event_type == "fsb:event:ping":
+                logger.info("Received ping from FreeStuff API")
+                return
+
+            if event_type == "fsb:event:announcement_created":
+                products = payload.get("data", {}).get("resolvedProducts", [])
+                if not products:
+                    logger.error("No products in announcement")
+                    return
+
+                for product in products:
+                    # Ensure all required fields are present
+                    if "urls" not in product:
+                        product["urls"] = []
+                    if "images" not in product:
+                        product["images"] = []
+                    if "prices" not in product:
+                        product["prices"] = [{"dollar": 0, "currency": "USD"}]
+                    if "copyright" not in product:
+                        product["copyright"] = ""
+                    
+                    await self._process_product(product)
+                return
+
+            if event_type == "fsb:event:product_updated":
+                product = payload.get("data")
+                if not product:
+                    logger.error("No product data in webhook payload")
+                    return
+
+                # Ensure all required fields are present
+                if "urls" not in product:
+                    product["urls"] = []
+                if "images" not in product:
+                    product["images"] = []
+                if "prices" not in product:
+                    product["prices"] = [{"dollar": 0, "currency": "USD"}]
+                if "copyright" not in product:
+                    product["copyright"] = ""
+
+                await self._process_product(product)
+                return
+
+            logger.error(f"Unknown event type: {event_type}")
+
+        except Exception as e:
+            logger.error(f"Error handling webhook: {e}")
 
     def _format_price(self, price: float) -> str:
         """Format price with currency symbol"""
         currency = self.settings["filters"]["currency"]
-        symbol = CURRENCIES.get(currency, "€")  # Get correct symbol for current currency
+        symbol = CURRENCIES.get(currency, "€")
         return f"{symbol}{price:.2f}"
 
-    def _create_game_embed(self, game: Dict[str, Any]) -> discord.Embed:
+    def _create_game_embed(self, product: Dict[str, Any]) -> discord.Embed:
         """Create embed for game announcement"""
-        store = game.get("store", "").lower()
+        store = product.get("store", "").lower()
         store_name = STORE_DISPLAY_NAMES.get(store, store.title())
         store_icon = STORE_ICONS.get(store)
         
-        # Format price with current currency setting
-        original_price = self._format_price(game.get("org_price", {}).get("dollar", 0))
-        
+        # Get price from the first price entry
+        price = product.get("prices", [{}])[0].get("dollar", 0)
+        original_price = self._format_price(price)
+
         # Create description with proper formatting
         description = (
-            f"> {game.get('description', 'No description available.')}\n\n"
-            f"~~{original_price}~~ **Free** until {datetime.fromtimestamp(game.get('until', 0)).strftime('%m/%d/%Y')}\u2000\u2000"
+            f"> {product.get('description', 'No description available.')}\n\n"
         )
-        if rating := game.get("rating"):
-            description += f"★ {rating * 10:.1f}/10"
-        
-        # Add links section with proper spacing
-        urls = game.get("urls", {})
+
+        # Add price and rating on the same line, spaced with em space
+        price_line = f"~~{original_price}~~ **Free** until {datetime.fromtimestamp(product.get('until', 0)/1000).strftime('%m/%d/%Y')}"
+        if rating := product.get("rating"):
+            price_line += f"\u2003★ {rating * 10:.1f}/10"  # \u2003 is an em space
+        description += price_line
+
+        # Add clickable markdown links for browser/client, bolded and spaced far apart
+        urls = product.get("urls", [])
+        main_url = urls[0]["url"] if urls else None
+        client_url = None
+        if main_url and store == "steam":
+            match = re.search(r'(?:app|a)/(\d+)', main_url)
+            if match:
+                app_id = match.group(1)
+                client_url = f"https://freestuffbot.xyz/ext/open-client/steam/{app_id}"
+
+        # Add links inline, bolded, and spaced with em spaces
         description += "\n\n"
-        if browser_url := urls.get("browser"):
-            description += f"[**Open in browser ↗**]({browser_url})\u2000\u2000\u2000"
-        if client_url := urls.get("client"):
-            description += f"[**Open in {store_name} Client ↗**]({client_url})"
+        links = []
+        if main_url:
+            links.append(f"**[View on {store_name} ↗]({main_url})**")
+        if client_url:
+            links.append(f"**[Open in {store_name} Client ↗]({client_url})**")
+        if links:
+            description += f"\u2003\u2003".join(links)  # Two em spaces between links
+
+        # Get the first image URL from the images array
+        if "images" in product and product["images"]:
+            sorted_images = sorted(product["images"], key=lambda x: x.get("priority", 0), reverse=True)
+            image_url = sorted_images[0].get("url")
+        else:
+            image_url = None
 
         embed = discord.Embed(
-            title=game.get("title"),
+            title=product.get("title"),
             description=description,
             color=self.embed_color,
-            url=game.get("urls", {}).get("default", "")  # Add URL to title
+            url=main_url or ""
         )
         
-        # Set store icon as thumbnail (right side)
         if store_icon:
             embed.set_thumbnail(url=store_icon)
         
         # Set game image
-        if thumbnail_data := game.get("thumbnail"):
-            if isinstance(thumbnail_data, dict):
-                if image_url := thumbnail_data.get("full") or thumbnail_data.get("org"):
-                    embed.set_image(url=image_url)
+        if image_url:
+            embed.set_image(url=image_url)
         
-        # Set publisher in footer
-        if publisher := game.get("copyright"):
-            embed.set_footer(text=f"© {publisher}")
+        # Add tags below the image as a bolded line of inline code, no label
+        tags = product.get("tags", [])
+        if tags:
+            tags_str = " ".join(f"`{tag}`" for tag in tags)
+            embed.add_field(name="\u200b", value=f"**{tags_str}**", inline=False)
         
+        publisher = product.get("copyright")
+        if publisher:
+            embed.set_footer(text=f"©️ {publisher}")
+
         return embed
 
-    @tasks.loop(minutes=30)
-    async def announce_games(self) -> None:
-        """Check for and announce new free games"""
-        if not self.session or not self.api_key:
-            return
-            
+    async def _process_product(self, product: Dict[str, Any]) -> None:
+        """Process a product from the webhook"""
         try:
-            # Validate channel
-            if not (channel := self.bot.get_channel(self.settings.get("channel_id"))):
-                logger.error("Free games announcement channel not found")
-                return
-
-            headers = {"Authorization": f"Basic {self.api_key}"}
-            
-            # Test API connection
-            if not await self._make_api_request("https://api.freestuffbot.xyz/v1/ping", headers):
-                return
-
-            # Get free games list
-            games_response = await self._make_api_request("https://api.freestuffbot.xyz/v1/games/free", headers)
-            if not games_response or not games_response.get("success"):
-                return
-                
-            games = games_response.get("data", [])
-            logger.info(f"Received {len(games)} game IDs")
-
-            announced = self.settings.get("announced_games", [])
-            game_details = []
-
-            # Get game details
-            for game_id in games:
-                if not isinstance(game_id, (int, str)) or game_id in ["success", "data"]:
-                    continue
-                    
-                if str(game_id) not in announced:
-                    if game_info := await self._get_game_details(game_id, headers):
-                        game_details.append(game_info)
-
-            # Update cache and announce new games
-            await self._update_cache_and_announce(game_details, channel, announced)
-
-        except Exception as e:
-            logger.error(f"Error in free games announcement task: {e}")
-
-    async def _update_cache_and_announce(
-        self, 
-        game_details: List[Dict], 
-        channel: discord.TextChannel,
-        announced: List[str]
-    ) -> None:
-        """Update cache and announce new games"""
-        try:
-            current_time = int(time.time())
+            # Check if product meets our filters
             filters = self.settings.get("filters", DEFAULT_SETTINGS["filters"])
+            if (product.get("store", "").lower() not in filters.get("stores", []) or
+                (product.get("rating", 0) * 10) < filters.get("min_rating", 0) or
+                product.get("prices", [{}])[0].get("dollar", 0) < filters.get("min_price", 0)):
+                return
             
-            # Keep existing non-expired games
-            existing_games = [
-                game for game in self.cached_games
-                if game.get("until", 0) > current_time
-            ]
-            
-            # Add new games to cache and announce
-            existing_ids = {game.get("id") for game in existing_games}
-            for game in game_details:
-                if (game and 
-                    game.get("until", 0) > current_time and
-                    game.get("id") not in existing_ids and
-                    game.get("store", "").lower() in filters.get("stores", []) and
-                    (game.get("rating", 0) * 10) >= filters.get("min_rating", 0) and
-                    game.get("org_price", {}).get("dollar", 0) >= filters.get("min_price", 0)
-                ):
-                    existing_games.append(game)
-                    existing_ids.add(game.get("id"))
-                    
-                    if str(game.get("id")) not in announced:
-                        try:
-                            embed = self._create_game_embed(game)
-                            
-                            # Get role mentions for notification
-                            notify_roles = filters.get("notify_roles", [])
-                            role_mentions = []
-                            for role_id in notify_roles:
-                                if role_id != "everyone":  # Skip @everyone
-                                    try:
-                                        role = channel.guild.get_role(int(role_id))
-                                        if role and role.mentionable:
-                                            role_mentions.append(role.mention)
-                                    except (ValueError, AttributeError):
-                                        continue
-                            
-                            # Join role mentions with spaces
-                            content = " ".join(role_mentions) if role_mentions else None
-                            
-                            # Use the new _post_announcement method with rate limit handling
-                            if await self._post_announcement(channel, content, embed):
-                                announced.append(str(game.get("id")))
-                            else:
-                                logger.error(f"Failed to announce game {game.get('id')} after retries")
-                                
-                            # Add delay between announcements to avoid rate limits
-                            await asyncio.sleep(2.0)
-                            
-                        except Exception as e:
-                            logger.error(f"Error announcing game {game.get('id')}: {e}")
-            
-            # Update cache
-            self.cached_games = existing_games
-            self.settings["cached_games"] = existing_games
-            
-            # Update settings
-            self.settings["announced_games"] = announced[-100:]
-            self._save_settings()
-            
-            logger.info(f"Updated cache with {len(existing_games)} games")
-        except Exception as e:
-            logger.error(f"Error updating cache and announcing: {e}")
+            # Get announcement channel
+            channel_id = self.settings.get("channel_id")
+            if not channel_id:
+                logger.error("No announcement channel configured. Use /freegames to set up a channel.")
+                return
 
-    @announce_games.before_loop
-    async def before_announce(self):
-        await self.bot.wait_until_ready()
+            # Try multiple methods to get the channel
+            channel = None
+            try:
+                # First try getting from cache
+                channel = self.bot.get_channel(channel_id)
+                
+                # If not in cache, try fetching
+                if not channel:
+                    logger.info(f"Channel {channel_id} not in cache, attempting to fetch...")
+                    channel = await self.bot.fetch_channel(channel_id)
+            except discord.NotFound:
+                logger.error(f"Channel {channel_id} not found. The channel may have been deleted.")
+                return
+            except discord.Forbidden:
+                logger.error(f"Bot doesn't have access to channel {channel_id}")
+                return
+            except Exception as e:
+                logger.error(f"Error fetching channel {channel_id}: {e}")
+                return
+
+            if not channel:
+                logger.error(f"Failed to get channel {channel_id}")
+                return
+
+            # Check if bot has permissions to send messages
+            if not channel.permissions_for(channel.guild.me).send_messages:
+                logger.error(f"Bot doesn't have permission to send messages in channel {channel.name} ({channel_id})")
+                return
+
+            # Create and send embed
+            embed = self._create_game_embed(product)
+            
+            # Get role mentions for notification
+            notify_roles = filters.get("notify_roles", [])
+            role_mentions = []
+            for role_id in notify_roles:
+                if role_id != "everyone":
+                    try:
+                        role = channel.guild.get_role(int(role_id))
+                        if role and role.mentionable:
+                            role_mentions.append(role.mention)
+                    except (ValueError, AttributeError):
+                        continue
+            
+            content = " ".join(role_mentions) if role_mentions else None
+            
+            # Send announcement
+            await self._post_announcement(channel, content, embed, product)
+            
+        except Exception as e:
+            logger.error(f"Error processing product: {e}")
+
+    async def _post_announcement(self, channel: discord.TextChannel, content: Optional[str], embed: discord.Embed, product: Dict[str, Any]) -> bool:
+        """Post announcement with rate limit handling"""
+        max_retries = 3
+        base_delay = 5.0
+        route = f"channels/{channel.id}/messages"
+        
+        for attempt in range(max_retries):
+            try:
+                await self.bot.rate_limit_tracker.before_request(route)
+                message = await channel.send(content=content, embed=embed)
+                
+                if hasattr(message, '_response'):
+                    self.bot.rate_limit_tracker.update_bucket(
+                        message._response.headers,
+                        route
+                    )
+                
+                return True
+                
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Max retries reached for announcement after rate limit")
+                        return False
+                    
+                    await self.bot.rate_limit_tracker.handle_rate_limit(e)
+                    continue
+                else:
+                    logger.error(f"HTTP error posting announcement: {e}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error posting announcement: {e}")
+                return False
+
+        return False
+
+    async def fetch_current_free_games(self) -> List[Dict[str, Any]]:
+        """Fetch currently free games from FreeStuff API"""
+        try:
+            if not self.api_key:
+                logger.error("No API key configured")
+                return []
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "application/json"
+            }
+
+            # Updated API endpoint to the correct one
+            async with self.session.get("https://api.freestuffbot.xyz/v2/games/current", headers=headers) as response:
+                if response.status == 404:
+                    logger.error("API endpoint not found. Please check the FreeStuff API documentation for the correct endpoint.")
+                    return []
+                elif response.status == 401:
+                    logger.error("Invalid API key. Please check your FREESTUFF_REST_API_KEY in the .env file.")
+                    return []
+                elif response.status != 200:
+                    logger.error(f"Failed to fetch games: {response.status} - {await response.text()}")
+                    return []
+
+                data = await response.json()
+                current_time = int(time.time() * 1000)  # Convert to milliseconds
+                
+                # Filter for currently free games
+                free_games = [
+                    game for game in data.get("data", [])
+                    if game.get("until", 0) > current_time and
+                    game.get("prices", [{}])[0].get("dollar", 0) == 0
+                ]
+                
+                logger.info(f"Found {len(free_games)} currently free games")
+                return free_games
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Network error fetching free games: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON response from API: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Error fetching current free games: {e}")
+            return []
 
     @app_commands.command(
         name="freegames",
@@ -536,116 +838,97 @@ class FreeGames(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def show_free_games(self, interaction: discord.Interaction) -> None:
-        """List all currently free games from cache"""
+        """List all currently free games from webhook.site"""
         try:
             await interaction.response.defer()
             
-            if not self.cached_games:
-                await interaction.followup.send("No free games found at the moment!", ephemeral=True)
+            if not self.webhook_url:
+                await interaction.followup.send("No webhook URL configured!", ephemeral=True)
                 return
 
-            logger.info(f"Displaying {len(self.cached_games)} cached games")
-            
-            for game in self.cached_games:
-                embed = self._create_game_embed(game)
-                await interaction.followup.send(embed=embed)
+            # Extract token from webhook URL
+            token = self.webhook_url.split('/')[-1]
+            if not token:
+                await interaction.followup.send("Invalid webhook URL format!", ephemeral=True)
+                return
+
+            # Get webhook data with increased limit
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://webhook.site/token/{token}/requests?sorting=newest&page=1&per_page=50") as response:
+                    if response.status != 200:
+                        await interaction.followup.send("Failed to fetch webhook data!", ephemeral=True)
+                        return
+
+                    data = await response.json()
+                    if not data or "data" not in data:
+                        await interaction.followup.send("No webhook data found!", ephemeral=True)
+                        return
+                
+                    # Process each request to find game announcements
+                    game_announcements = []
+                    for request in data.get("data", []):
+                        try:
+                            content = request.get("content")
+                            if not content:
+                                continue
+
+                            payload = json.loads(content)
+                            event_type = payload.get("type")
+                            
+                            if event_type == "fsb:event:announcement_created":
+                                products = payload.get("data", {}).get("resolvedProducts", [])
+                                for product in products:
+                                    if product not in game_announcements:
+                                        game_announcements.append(product)
+                            elif event_type == "fsb:event:product_updated":
+                                product = payload.get("data", {})
+                                if product and product not in game_announcements:
+                                    game_announcements.append(product)
+                        except Exception as e:
+                            logger.error(f"Error processing webhook request: {e}")
+                            continue
+
+                    if not game_announcements:
+                        await interaction.followup.send("No free games found in webhook history!", ephemeral=True)
+                        return
+
+                    logger.info(f"Displaying {len(game_announcements)} free games from webhook history")
+                    
+                    # Send each game in a separate message
+                    for game in game_announcements:
+                        embed = self._create_game_embed(game)
+                        await interaction.followup.send(embed=embed)
 
         except Exception as e:
             logger.error(f"Error listing free games: {e}")
             await interaction.followup.send("An error occurred while fetching free games!", ephemeral=True)
 
-    async def _make_api_request(self, url: str, headers: Dict[str, str], timeout: int = 10) -> Optional[Dict]:
-        """Make an API request with proper error handling"""
+    async def cog_load(self) -> None:
+        """Load settings and start webhook check task"""
         try:
-            # Check rate limits before making request
-            route = url.split('/')[-1]  # Use endpoint as route
-            await self.bot.rate_limit_tracker.before_request(route)
-            
-            async with self.session.get(url, headers=headers, timeout=timeout) as resp:
-                # Update rate limit tracking from response headers
-                self.bot.rate_limit_tracker.update_bucket(resp.headers, route)
-                
-                if resp.status == 429:  # Rate limit
-                    retry_after = float(resp.headers.get('Retry-After', 60))
-                    is_global = resp.headers.get('X-RateLimit-Global', 'false').lower() == 'true'
-                    scope = resp.headers.get('X-RateLimit-Scope', 'user')
-                    bucket = resp.headers.get('X-RateLimit-Bucket')
-                    
-                    logger.warning(
-                        f"Rate limited on {url} "
-                        f"(scope: {scope}, {'global' if is_global else f'bucket: {bucket}'}) "
-                        f"retry after {retry_after}s"
-                    )
-                    
-                    # Use exponential backoff
-                    backoff_retry = min(retry_after * 1.5, 300)  # Cap at 5 minutes
-                    await asyncio.sleep(backoff_retry)
-                    
-                    # Retry the request recursively
-                    return await self._make_api_request(url, headers, timeout)
-                
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    logger.error(f"API request failed: {resp.status} - {error_text}")
-                    return None
-                
-                return await resp.json()
-                
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout while requesting {url}")
-            return None
+            self.settings = self._load_settings()
+            self.cached_games = self.settings.get("cached_games", [])
+            self.webhook_url = os.getenv("YOUR_WEBHOOK_URL")
+            self.webhook_secret = os.getenv("FREESTUFF_PUBLIC_KEY")
+            if not self.webhook_url:
+                logger.error("YOUR_WEBHOOK_URL not configured in environment variables")
+            if not self.webhook_secret:
+                logger.error("FREESTUFF_PUBLIC_KEY not configured in environment variables")
+            # Start webhook check task
+            self.webhook_check.start()
         except Exception as e:
-            logger.error(f"API request error for {url}: {e}")
-            return None
+            logger.error(f"Error loading FreeGames cog: {e}")
+            raise e
 
-    async def _post_announcement(self, channel: discord.TextChannel, content: Optional[str], embed: discord.Embed) -> bool:
-        """Post announcement with rate limit handling"""
-        max_retries = 3
-        base_delay = 5.0
-        route = f"channels/{channel.id}/messages"
-        
-        for attempt in range(max_retries):
-            try:
-                # Check rate limits before sending
-                await self.bot.rate_limit_tracker.before_request(route)
-                
-                message = await channel.send(content=content, embed=embed)
-                
-                # Update rate limit tracking from response
-                if hasattr(message, '_response'):
-                    self.bot.rate_limit_tracker.update_bucket(
-                        message._response.headers,
-                        route
-                    )
-                
-                return True
-                
-            except discord.HTTPException as e:
-                if e.status == 429:  # Rate limit
-                    if attempt == max_retries - 1:
-                        logger.error(f"Max retries reached for announcement after rate limit")
-                        return False
-                    
-                    # Update rate limit tracking
-                    await self.bot.rate_limit_tracker.handle_rate_limit(e)
-                    continue
-                else:
-                    logger.error(f"HTTP error posting announcement: {e}")
-                    return False
-            except Exception as e:
-                logger.error(f"Error posting announcement: {e}")
-                return False
-        
-        return False
-
-    async def _get_game_details(self, game_id: str, headers: Dict[str, str]) -> Optional[Dict]:
-        """Fetch details for a specific game"""
-        url = f"https://api.freestuffbot.xyz/v1/game/{game_id}/info"
-        response = await self._make_api_request(url, headers)
-        
-        if response and response.get("success"):
-            return response.get("data", {}).get(str(game_id))
-        return None
+    async def cog_unload(self) -> None:
+        """Stop webhook check task when cog is unloaded"""
+        try:
+            if self.webhook_check.is_running():
+                self.webhook_check.cancel()
+            self._save_settings()  # Save settings before unloading
+            self.processed_requests.clear()
+        except Exception as e:
+            logger.error(f"Error stopping webhook check task: {e}")
 
 class SettingsConfigView(BaseSettingsView):
     def __init__(self, cog: 'FreeGames', previous_view=None):
