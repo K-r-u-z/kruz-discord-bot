@@ -33,11 +33,16 @@ STORE_DISPLAY_NAMES = {
     "itch": "itch.io"
 }
 
-# Add new settings defaults
-CURRENCIES = {
-    "EUR": "€",
+# Replace the CURRENCIES dict with all currencies from the provided FreeStuff payload
+FREESTUFF_CURRENCIES = {
     "USD": "$",
-    "GBP": "£"
+    "EUR": "€",
+    "GBP": "£",
+    "BRL": "R$",
+    "BGN": "лв",
+    "PLN": "zł",
+    "HUF": "Ft",
+    "BTC": "₿"
 }
 
 DEFAULT_SETTINGS = {
@@ -258,9 +263,17 @@ class GameButtonsView(discord.ui.View):
         store_name = STORE_DISPLAY_NAMES.get(store, store.title())
         store_icon = STORE_ICONS.get(store)
         
-        # Get price from the first price entry
-        price = product.get("prices", [{}])[0].get("dollar", 0)
-        original_price = self._format_price(price)
+        # Get price info for the selected currency
+        filters = self.cog.settings.get("filters", DEFAULT_SETTINGS["filters"])
+        currency = filters.get("currency", "USD").upper()
+        prices = product.get("prices", [])
+        price_obj = next((p for p in prices if p.get("currency", "").upper() == currency), None)
+        if not price_obj and prices:
+            price_obj = prices[0]
+        if price_obj:
+            original_price = self._format_price(price_obj.get("oldValue", 0), price_obj.get("currency", "USD"))
+        else:
+            original_price = self._format_price(0, currency)
 
         # Create description with proper formatting
         description = (
@@ -374,6 +387,8 @@ class FreeGames(commands.Cog):
         self.api_key = FREESTUFF_REST_API_KEY
         self.cached_games = self.settings.get("cached_games", [])
         self.processed_requests = set(self.settings.get("processed_requests", []))
+        self.webhook_url = os.getenv("YOUR_WEBHOOK_URL")
+        self.webhook_secret = os.getenv("FREESTUFF_PUBLIC_KEY")
         
         # No need to start announcement task since we're using webhooks
         # The webhook handler is registered in cog_load
@@ -587,11 +602,12 @@ class FreeGames(commands.Cog):
         except Exception as e:
             logger.error(f"Error handling webhook: {e}")
 
-    def _format_price(self, price: float) -> str:
-        """Format price with currency symbol"""
-        currency = self.settings["filters"]["currency"]
-        symbol = CURRENCIES.get(currency, "€")
-        return f"{symbol}{price:.2f}"
+    def _format_price(self, price: float, currency: str) -> str:
+        # For BTC, don't divide by 100
+        if currency.upper() == "BTC":
+            return f"₿{price:.8f}"
+        symbol = FREESTUFF_CURRENCIES.get(currency.upper(), "€")
+        return f"{symbol}{price / 100:.2f}"
 
     def _create_game_embed(self, product: Dict[str, Any]) -> discord.Embed:
         """Create embed for game announcement"""
@@ -599,9 +615,17 @@ class FreeGames(commands.Cog):
         store_name = STORE_DISPLAY_NAMES.get(store, store.title())
         store_icon = STORE_ICONS.get(store)
         
-        # Get price from the first price entry
-        price = product.get("prices", [{}])[0].get("dollar", 0)
-        original_price = self._format_price(price)
+        # Get price info for the selected currency
+        filters = self.settings.get("filters", DEFAULT_SETTINGS["filters"])
+        currency = filters.get("currency", "USD").upper()
+        prices = product.get("prices", [])
+        price_obj = next((p for p in prices if p.get("currency", "").upper() == currency), None)
+        if not price_obj and prices:
+            price_obj = prices[0]
+        if price_obj:
+            original_price = self._format_price(price_obj.get("oldValue", 0), price_obj.get("currency", "USD"))
+        else:
+            original_price = self._format_price(0, currency)
 
         # Create description with proper formatting
         description = (
@@ -668,8 +692,13 @@ class FreeGames(commands.Cog):
         return embed
 
     async def _process_product(self, product: Dict[str, Any]) -> None:
-        """Process a product from the webhook"""
         try:
+            # First check if channel is set up
+            channel_id = self.settings.get("channel_id")
+            if not channel_id:
+                logger.info("No announcement channel set up yet, skipping product")
+                return
+
             # Check if product meets our filters
             filters = self.settings.get("filters", DEFAULT_SETTINGS["filters"])
             if (product.get("store", "").lower() not in filters.get("stores", []) or
@@ -677,19 +706,10 @@ class FreeGames(commands.Cog):
                 product.get("prices", [{}])[0].get("dollar", 0) < filters.get("min_price", 0)):
                 return
             
-            # Get announcement channel
-            channel_id = self.settings.get("channel_id")
-            if not channel_id:
-                logger.error("No announcement channel configured. Use /freegames to set up a channel.")
-                return
-
-            # Try multiple methods to get the channel
             channel = None
             try:
-                # First try getting from cache
                 channel = self.bot.get_channel(channel_id)
                 
-                # If not in cache, try fetching
                 if not channel:
                     logger.info(f"Channel {channel_id} not in cache, attempting to fetch...")
                     channel = await self.bot.fetch_channel(channel_id)
@@ -707,15 +727,12 @@ class FreeGames(commands.Cog):
                 logger.error(f"Failed to get channel {channel_id}")
                 return
 
-            # Check if bot has permissions to send messages
             if not channel.permissions_for(channel.guild.me).send_messages:
                 logger.error(f"Bot doesn't have permission to send messages in channel {channel.name} ({channel_id})")
                 return
 
-            # Create and send embed
             embed = self._create_game_embed(product)
             
-            # Get role mentions for notification
             notify_roles = filters.get("notify_roles", [])
             role_mentions = []
             for role_id in notify_roles:
@@ -729,8 +746,11 @@ class FreeGames(commands.Cog):
             
             content = " ".join(role_mentions) if role_mentions else None
             
-            # Send announcement
             await self._post_announcement(channel, content, embed, product)
+            if product not in self.cached_games:
+                self.cached_games.append(product)
+                self.settings["cached_games"] = self.cached_games
+                self._save_settings()
             
         except Exception as e:
             logger.error(f"Error processing product: {e}")
@@ -894,11 +914,15 @@ class FreeGames(commands.Cog):
 
                     logger.info(f"Displaying {len(game_announcements)} free games from webhook history")
                     
-                    # Send each game in a separate message
+                    # Send initial message to acknowledge the command
+                    await interaction.followup.send("Here are the currently free games:", ephemeral=True)
+                    
+                    # Send each game in a separate message in the channel
+                    channel = interaction.channel
                     for game in game_announcements:
                         embed = self._create_game_embed(game)
-                        await interaction.followup.send(embed=embed)
-
+                        await channel.send(embed=embed)
+                    
         except Exception as e:
             logger.error(f"Error listing free games: {e}")
             await interaction.followup.send("An error occurred while fetching free games!", ephemeral=True)
@@ -908,8 +932,6 @@ class FreeGames(commands.Cog):
         try:
             self.settings = self._load_settings()
             self.cached_games = self.settings.get("cached_games", [])
-            self.webhook_url = os.getenv("YOUR_WEBHOOK_URL")
-            self.webhook_secret = os.getenv("FREESTUFF_PUBLIC_KEY")
             if not self.webhook_url:
                 logger.error("YOUR_WEBHOOK_URL not configured in environment variables")
             if not self.webhook_secret:
@@ -929,6 +951,17 @@ class FreeGames(commands.Cog):
             self.processed_requests.clear()
         except Exception as e:
             logger.error(f"Error stopping webhook check task: {e}")
+
+    def get_available_currencies(self):
+        currencies = set()
+        for game in self.cached_games:
+            for price in game.get("prices", []):
+                cur = price.get("currency", "").upper()
+                if cur:
+                    currencies.add(cur)
+        # Always include the statically supported ones as fallback
+        currencies.update(FREESTUFF_CURRENCIES.keys())
+        return sorted(currencies)
 
 class SettingsConfigView(BaseSettingsView):
     def __init__(self, cog: 'FreeGames', previous_view=None):
@@ -1025,8 +1058,8 @@ class PriceInputModal(discord.ui.Modal, title="Set Minimum Price"):
                 filters = self.cog.settings.setdefault("filters", DEFAULT_SETTINGS["filters"])
                 filters["min_price"] = price
                 self.cog._save_settings()
-                currency = filters.get("currency", "EUR")
-                symbol = CURRENCIES.get(currency, "€")
+                currency = filters.get("currency", "USD")
+                symbol = FREESTUFF_CURRENCIES.get(currency, "$")
                 
                 # Update the price settings view
                 embed = discord.Embed(
@@ -1046,8 +1079,8 @@ class PriceSettingsView(BaseSettingsView):
         super().__init__(cog, previous_view)
         # Get current currency for display
         filters = cog.settings.get("filters", DEFAULT_SETTINGS["filters"])
-        currency = filters.get("currency", "EUR")
-        symbol = CURRENCIES.get(currency, "€")
+        currency = filters.get("currency", "USD")
+        symbol = FREESTUFF_CURRENCIES.get(currency, "$")
         price = filters.get("min_price", 0)
         
         # Add currency select with current selection
@@ -1073,16 +1106,14 @@ class CurrencySelect(discord.ui.Select):
         self.cog = cog
         self.view_ref = None  # Will store reference to parent view
         filters = cog.settings.get("filters", {})
-        current = filters.get("currency", "EUR")
-        
+        current = filters.get("currency", "USD")
         options = [
             discord.SelectOption(
                 label=f"{curr} ({symbol})",
                 value=curr,
                 default=curr == current
-            ) for curr, symbol in CURRENCIES.items()
+            ) for curr, symbol in FREESTUFF_CURRENCIES.items()
         ]
-        
         super().__init__(
             placeholder=f"Current: {current}",
             min_values=1,
@@ -1100,7 +1131,7 @@ class CurrencySelect(discord.ui.Select):
         
         # Update the embed
         currency = self.values[0]
-        symbol = CURRENCIES.get(currency, "€")
+        symbol = FREESTUFF_CURRENCIES.get(currency, "$")
         price = filters.get("min_price", 0)
         embed = discord.Embed(
             title="Price Settings",
@@ -1212,6 +1243,26 @@ class StoreSettingsView(BaseSettingsView):
             await interaction.response.edit_message(view=self)
         return callback
 
+class NotificationSettingsView(BaseSettingsView):
+    def __init__(self, cog: 'FreeGames', previous_view=None):
+        super().__init__(cog, previous_view)
+        # Add button for manual role input
+        add_role_button = discord.ui.Button(
+            label="➕ Add Role Manually",
+            style=discord.ButtonStyle.secondary,
+            custom_id="add_role_manual"
+        )
+        add_role_button.callback = self.add_role_manually
+        self.add_item(add_role_button)
+
+    def update_role_select(self, guild: discord.Guild):
+        """Add role select after guild is available"""
+        self.add_item(RoleSelect(self.cog, guild))
+
+    async def add_role_manually(self, interaction: discord.Interaction):
+        modal = RoleInputModal(self.cog, self)
+        await interaction.response.send_modal(modal)
+
 class RoleInputModal(discord.ui.Modal, title="Add Role by Name/ID"):
     role_input = discord.ui.TextInput(
         label="Role Name or ID",
@@ -1283,26 +1334,6 @@ class RoleInputModal(discord.ui.Modal, title="Add Role by Name/ID"):
             view=self.parent_view
         )
 
-class NotificationSettingsView(BaseSettingsView):
-    def __init__(self, cog: 'FreeGames', previous_view=None):
-        super().__init__(cog, previous_view)
-        # Add button for manual role input
-        add_role_button = discord.ui.Button(
-            label="➕ Add Role Manually",
-            style=discord.ButtonStyle.secondary,
-            custom_id="add_role_manual"
-        )
-        add_role_button.callback = self.add_role_manually
-        self.add_item(add_role_button)
-
-    def update_role_select(self, guild: discord.Guild):
-        """Add role select after guild is available"""
-        self.add_item(RoleSelect(self.cog, guild))
-
-    async def add_role_manually(self, interaction: discord.Interaction):
-        modal = RoleInputModal(self.cog, self)
-        await interaction.response.send_modal(modal)
-
 def create_settings_embed(cog: 'FreeGames') -> discord.Embed:
     """Create an embed showing current settings"""
     settings = cog.settings
@@ -1327,8 +1358,8 @@ def create_settings_embed(cog: 'FreeGames') -> discord.Embed:
     )
     
     # Add filter settings
-    currency = filters.get("currency", "EUR")
-    symbol = CURRENCIES.get(currency, "€")
+    currency = filters.get("currency", "USD")
+    symbol = FREESTUFF_CURRENCIES.get(currency, "$")
     embed.add_field(
         name="Price Filter",
         value=f"Min: {symbol}{filters.get('min_price', 0):.2f}\nCurrency: {currency}",
@@ -1338,6 +1369,14 @@ def create_settings_embed(cog: 'FreeGames') -> discord.Embed:
         name="Rating Filter",
         value=f"Minimum: {filters.get('min_rating', 0)}/10",
         inline=True
+    )
+    
+    # Show available currencies (static)
+    currency_list = ", ".join([f"{c} ({s})" for c, s in FREESTUFF_CURRENCIES.items()])
+    embed.add_field(
+        name="Available Currencies",
+        value=currency_list,
+        inline=False
     )
     
     # Show notification settings

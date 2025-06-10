@@ -18,11 +18,7 @@
             "uplay",
             "battlenet"
         ],
-        "notify_roles": [
-            "1340828266902196336"
-        ]
+        "notify_roles": []
     },
-    "processed_requests": [
-        "8af80c20-f5f9-49b2-aafc-e0e5471ad124"
-    ]
+    "processed_requests": []
 }
