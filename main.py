@@ -294,6 +294,7 @@ class KruzBot(commands.Bot):
         
         self.initial_extensions: List[str] = [
             'cogs.embeds',
+            'cogs.rss_feed',
             'cogs.moderation',
             'cogs.memes',
             'cogs.settings',
@@ -302,7 +303,8 @@ class KruzBot(commands.Bot):
             'cogs.automod',
             'cogs.leveling',
             'cogs.voice_channels',
-            'cogs.clans'
+            'cogs.clans',
+            'cogs.earthquakes'
         ]
         
         self.guild = discord.Object(id=GUILD_ID)

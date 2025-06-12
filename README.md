@@ -71,6 +71,24 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - Level-based access (requires level 10)
 - Automatic category management
 
+### RSS Feed System
+- Multiple RSS feed support
+- Customizable feed colors per channel
+- Role mention notifications
+- Duplicate post prevention
+- Configurable check intervals
+- Feed management interface
+- Title history tracking
+
+### Earthquake Feed
+- Real-time earthquake alerts
+- Customizable alert colors
+- Role mention notifications
+- Magnitude-based filtering
+- Location-based filtering
+- Detailed earthquake information
+- Automatic feed updates
+
 ## Commands
 
 ### Welcome Message Commands
@@ -163,6 +181,26 @@ Join https://discord.gg/9qaK8uaKXN to see the bot in action!
 - `/voice` - Manage private voice channels
 - `/voicesetup` - Set up the category for private voice channels
 
+### RSS Feed Commands
+- `/rss` - Manage RSS feed settings
+  - `➕ Add Feed` - Add a new RSS feed
+  - `📋 List Feeds` - View all configured feeds
+  - `✏️ Edit Feed` - Modify existing feed settings
+  - `🎨 Set Channel Color` - Customize feed colors
+  - `📢 Set Role Mentions` - Configure role notifications
+  - `⏱️ Set Check Interval` - Adjust update frequency
+  - `🔄 Toggle RSS System` - Enable/Disable feed system
+  - `🧹 Manage Duplicates` - Configure duplicate prevention
+  - `📢 Post Latest` - Manually post latest feed items
+
+### Earthquake Commands
+- `/earthquake` - Manage earthquake feed settings
+  - `📌 Setup Channel` - Set alert channel
+  - `🔄 Toggle Feed` - Enable/Disable alerts
+  - `📊 Status` - View feed status
+  - `🎨 Color Settings` - Customize alert colors
+  - `👥 Manage Roles` - Configure role notifications
+
 ## Setup
 
 1. Clone repository
@@ -242,6 +280,8 @@ Embeds support these formatting options in title and description:
   - clans.py
   - voice_channels.py
   - automod.py
+  - rss_feed.py
+  - earthquakes.py
   - __init__.py
 - data/
   - bot_settings.json
@@ -249,19 +289,26 @@ Embeds support these formatting options in title and description:
   - embedded_messages_ids.json
   - meme_settings.json
   - freegames_settings.json
-  - welcome_settings.json
+  - earthquake_settings.json
   - leveling_settings.json
-  - clans.json
+  - rss_settings.json
   - voice_settings.json
   - automod_settings.json
+  - welcome_settings.json
+  - clans.json
 
 ## Requirements
-- Python 3.8+
-- discord.py
-- python-dotenv
-- asyncpraw
-- async-timeout
-- aiohttp
+
+- Python 3.8 or higher
+- discord.py>=2.3.0
+- python-dotenv>=1.0.0
+- asyncpraw>=7.7.1
+- async-timeout>=4.0.3
+- aiohttp>=3.8.1
+- PyNaCl>=1.4.0
+- requests>=2.31.0
+- python-dateutil>=2.8.2
+- feedparser>=6.0.10
 
 ## Installation
 1. Clone the repository
