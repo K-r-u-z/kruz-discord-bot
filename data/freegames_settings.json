@@ -20,12 +20,5 @@
         ],
         "notify_roles": []
     },
-    "processed_requests": [
-        "cdc8206b-ee0a-497c-91d9-b036192a58c7",
-        "1aa09daf-ffa5-417d-a695-26ae99cc1b37",
-        "fd2b4820-b563-4b28-85ef-ba212783ac1a",
-        "8af80c20-f5f9-49b2-aafc-e0e5471ad124",
-        "3e8155a4-cc59-4aaa-9944-3dd76df0f876",
-        "589a2a3f-72b1-4829-9d68-e84278faff7b"
-    ]
+    "processed_requests": []
 }

@@ -24,8 +24,8 @@ DEFAULT_SETTINGS = {
     "channel_colors": {},  # Store colors for each channel
     "channel_mentions": {},  # Store role mentions for each channel
     "check_interval": 15,  # Default check interval in minutes
-    "recent_titles": [],  # Track recent post titles to avoid duplicates
-    "max_title_history": 100  # Maximum number of titles to keep in history
+    "processed_entries": {},  # Track processed entries by feed URL
+    "max_processed_entries": 100  # Maximum number of entries to remember per feed
 }
 
 class RSSFeedError(Exception):
@@ -66,12 +66,12 @@ class FeedConfigView(discord.ui.View):
         # Add current status and check interval to the embed
         status = "Enabled" if self.cog.settings.get("enabled", False) else "Disabled"
         interval = self.cog.settings.get("check_interval", 15)
-        max_history = self.cog.settings.get("max_title_history", 100)
-        current_history = len(self.cog.settings.get("recent_titles", []))
+        max_history = self.cog.settings.get("max_processed_entries", 100)
+        current_history = len(self.cog.settings.get("processed_entries", {}).get(feeds[0]["url"], []))
         
         embed.add_field(
             name="System Status",
-            value=f"**Status:** {status}\n**Check Interval:** {interval} minutes\n**Title History:** {current_history}/{max_history}",
+            value=f"**Status:** {status}\n**Check Interval:** {interval} minutes\n**Entry History:** {current_history}/{max_history}",
             inline=False
         )
         
@@ -262,7 +262,7 @@ class FeedConfigView(discord.ui.View):
                         latest_entry = feed.entries[0]
                         
                         # Check for duplicate titles
-                        if self.cog._is_duplicate_title(latest_entry.title):
+                        if self.cog._is_duplicate_entry(feed_config["url"], latest_entry.id):
                             skip_count += 1
                             error_messages.append(f"Skipped duplicate post: '{latest_entry.title}' from {feed_config['name']}")
                             continue
@@ -274,6 +274,7 @@ class FeedConfigView(discord.ui.View):
                         embed, view = self.cog._create_feed_embed(latest_entry, feed_config["name"], feed_config["channel_id"])
                         # Send mentions and embed in the same message
                         await interaction.channel.send(content=mention_text if mention_text else None, embed=embed, view=view)
+                        self.cog._add_processed_entry(feed_config["url"], latest_entry.id)
                         success_count += 1
 
             except Exception as e:
@@ -938,7 +939,7 @@ class DuplicatesManagementView(discord.ui.View):
     @discord.ui.button(label="🧹 Clear Title History", style=discord.ButtonStyle.danger)
     async def clear_title_history(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Clear the title history
-        self.cog.settings["recent_titles"] = []
+        self.cog.settings["processed_entries"] = {}
         self.cog._save_settings()
         
         await interaction.response.send_message(
@@ -957,11 +958,11 @@ class TitleHistorySizeModal(discord.ui.Modal, title="Set Title History Size"):
         self.cog = cog
         
         # Get current size
-        current_size = cog.settings.get("max_title_history", 100)
+        current_size = cog.settings.get("max_processed_entries", 100)
         
         self.size = discord.ui.TextInput(
             label="History Size",
-            placeholder="Enter maximum number of titles to remember",
+            placeholder="Enter maximum number of entries to remember",
             default=str(current_size),
             required=True,
             min_length=1,
@@ -980,13 +981,8 @@ class TitleHistorySizeModal(discord.ui.Modal, title="Set Title History Size"):
                 return
             
             # Update the history size
-            self.cog.settings["max_title_history"] = size
+            self.cog.settings["max_processed_entries"] = size
             
-            # Trim the current history if needed
-            current_titles = self.cog.settings.get("recent_titles", [])
-            if len(current_titles) > size:
-                self.cog.settings["recent_titles"] = current_titles[-size:]
-                
             self.cog._save_settings()
             
             await interaction.response.send_message(
@@ -1027,57 +1023,33 @@ class RSSFeed(commands.Cog):
         except Exception:
             pass
 
-    def _normalize_title(self, title: str) -> str:
-        """Normalize a title for comparison to avoid duplicates."""
-        if not title:
-            return ""
-        # Decode HTML entities
-        title = html.unescape(title)
-        # Remove HTML tags
-        title = re.sub(r'<[^>]+>', '', title)
-        # Convert to lowercase
-        title = title.lower()
-        # Remove punctuation and extra whitespace
-        title = re.sub(r'[^\w\s]', '', title)
-        # Replace multiple spaces with a single space
-        title = re.sub(r'\s+', ' ', title)
-        # Trim
-        return title.strip()
-        
-    def _is_duplicate_title(self, title: str) -> bool:
-        """Check if a title has been posted recently."""
-        normalized_title = self._normalize_title(title)
-        if not normalized_title:
-            return False
-            
-        # Check if this title is in our recent titles list
-        if normalized_title in self.settings.get("recent_titles", []):
-            return True
-            
-        # Add to recent titles and maintain max size
-        recent_titles = self.settings.get("recent_titles", [])
-        recent_titles.append(normalized_title)
-        
-        # Keep only the most recent titles
-        max_history = self.settings.get("max_title_history", 100)
-        if len(recent_titles) > max_history:
-            recent_titles = recent_titles[-max_history:]
-            
-        self.settings["recent_titles"] = recent_titles
-        return False
+    def _is_duplicate_entry(self, feed_url: str, entry_id: str) -> bool:
+        """Check if an entry has been processed before."""
+        processed_entries = self.settings.get("processed_entries", {}).get(feed_url, [])
+        return entry_id in processed_entries
 
-    @tasks.loop(minutes=15)  # Default interval
+    def _add_processed_entry(self, feed_url: str, entry_id: str) -> None:
+        """Add an entry to the processed entries list and maintain max size."""
+        if "processed_entries" not in self.settings:
+            self.settings["processed_entries"] = {}
+            
+        if feed_url not in self.settings["processed_entries"]:
+            self.settings["processed_entries"][feed_url] = []
+            
+        processed_entries = self.settings["processed_entries"][feed_url]
+        processed_entries.append(entry_id)
+        
+        # Keep only the most recent entries
+        max_entries = self.settings.get("max_processed_entries", 100)
+        if len(processed_entries) > max_entries:
+            self.settings["processed_entries"][feed_url] = processed_entries[-max_entries:]
+
+    @tasks.loop(minutes=15)
     async def check_feeds(self) -> None:
         if not self.settings.get("enabled", False):
             return
 
         total_new_entries = 0
-        is_initial_run = not self.settings.get("last_entries", {})
-        
-        if is_initial_run:
-            logger.info("Starting initial RSS feed check...")
-        else:
-            logger.info("Checking RSS feeds for updates...")
         
         for feed_config in self.settings.get("feeds", []):
             try:
@@ -1093,67 +1065,37 @@ class RSSFeed(commands.Cog):
                 async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
                     async with session.get(feed_config["url"]) as response:
                         if response.status != 200:
-                            logger.warning(f"Failed to fetch feed {feed_config['name']}: HTTP {response.status}")
                             continue
                         
                         content = await response.text()
                         feed = feedparser.parse(content)
 
                         if not feed.entries:
-                            logger.warning(f"No entries found in feed {feed_config['name']}")
                             continue
 
                         # Get the most recent entry
                         latest_entry = feed.entries[0]
                         
-                        # Check for duplicate titles across feeds
-                        if self._is_duplicate_title(latest_entry.title):
-                            logger.info(f"Skipping duplicate post: '{latest_entry.title}' from {feed_config['name']}")
+                        # Check if we've already processed this entry
+                        if self._is_duplicate_entry(feed_config["url"], latest_entry.id):
+                            continue
+                        
+                        channel = self.bot.get_channel(feed_config["channel_id"])
+                        if channel:
+                            # Get role mentions for this channel
+                            role_mentions = self.settings.get("channel_mentions", {}).get(str(feed_config["channel_id"]), [])
+                            mention_text = " ".join([f"<@&{role_id}>" for role_id in role_mentions])
                             
-                            # Still update the last entry ID to avoid processing it again
-                            self.settings["last_entries"][feed_config["url"]] = latest_entry.id
-                            continue
-                        
-                        # On initial run, only process the most recent entry
-                        if is_initial_run:
-                            channel = self.bot.get_channel(feed_config["channel_id"])
-                            if channel:
-                                # Get role mentions for this channel
-                                role_mentions = self.settings.get("channel_mentions", {}).get(str(feed_config["channel_id"]), [])
-                                mention_text = " ".join([f"<@&{role_id}>" for role_id in role_mentions])
-                                
-                                embed, view = self._create_feed_embed(latest_entry, feed_config["name"], feed_config["channel_id"])
-                                # Send mentions and embed in the same message
-                                await channel.send(content=mention_text if mention_text else None, embed=embed, view=view)
-                                self.settings["last_entries"][feed_config["url"]] = latest_entry.id
-                                total_new_entries += 1
-                            continue
-
-                        # For subsequent runs, check if the latest entry is new
-                        last_entry = self.settings.get("last_entries", {}).get(feed_config["url"])
-                        
-                        # Only post if the latest entry is different from the last one we posted
-                        if last_entry != latest_entry.id:
-                            channel = self.bot.get_channel(feed_config["channel_id"])
-                            if channel:
-                                # Get role mentions for this channel
-                                role_mentions = self.settings.get("channel_mentions", {}).get(str(feed_config["channel_id"]), [])
-                                mention_text = " ".join([f"<@&{role_id}>" for role_id in role_mentions])
-                                
-                                embed, view = self._create_feed_embed(latest_entry, feed_config["name"], feed_config["channel_id"])
-                                # Send mentions and embed in the same message
-                                await channel.send(content=mention_text if mention_text else None, embed=embed, view=view)
-                                self.settings["last_entries"][feed_config["url"]] = latest_entry.id
-                                total_new_entries += 1
+                            embed, view = self._create_feed_embed(latest_entry, feed_config["name"], feed_config["channel_id"])
+                            await channel.send(content=mention_text if mention_text else None, embed=embed, view=view)
+                            
+                            # Mark this entry as processed
+                            self._add_processed_entry(feed_config["url"], latest_entry.id)
+                            total_new_entries += 1
 
             except Exception as e:
-                logger.error(f"Error processing feed {feed_config['name']}: {e}")
                 continue
 
-        if total_new_entries > 0:
-            logger.info(f"RSS Feed update complete: Found {total_new_entries} new entries")
-        else:
-            logger.info("RSS Feed update complete: No new entries found")
         self._save_settings()
 
     def _create_feed_embed(self, entry, feed_name: str, channel_id: int) -> discord.Embed:
@@ -1216,13 +1158,86 @@ class RSSFeed(commands.Cog):
         else:
             embed.set_footer(text=f"Posted on {website}")
 
+        # Enhanced image extraction logic
+        image_url = None
+
+        # 1. Check media_content (common in RSS feeds)
         if hasattr(entry, "media_content") and entry.media_content:
-            embed.set_image(url=entry.media_content[0]["url"])
-        elif hasattr(entry, "links"):
+            for media in entry.media_content:
+                if media.get("type", "").startswith("image/"):
+                    image_url = media.get("url")
+                    break
+
+        # 2. Check links (common in Atom feeds)
+        if not image_url and hasattr(entry, "links"):
             for link in entry.links:
                 if link.get("type", "").startswith("image/"):
-                    embed.set_image(url=link["href"])
+                    image_url = link.get("href")
                     break
+
+        # 3. Check enclosures (common in podcast feeds)
+        if not image_url and hasattr(entry, "enclosures"):
+            for enclosure in entry.enclosures:
+                if enclosure.get("type", "").startswith("image/"):
+                    image_url = enclosure.get("href")
+                    break
+
+        # 4. Check for image tags in content
+        if not image_url and hasattr(entry, "content"):
+            for content in entry.content:
+                if "img" in content.value.lower():
+                    # Extract image URL from img tag
+                    img_match = re.search(r'<img[^>]+src="([^">]+)"', content.value)
+                    if img_match:
+                        image_url = img_match.group(1)
+
+        # 5. Check for image tags in description
+        if not image_url and hasattr(entry, "description"):
+            img_match = re.search(r'<img[^>]+src="([^">]+)"', entry.description)
+            if img_match:
+                image_url = img_match.group(1)
+
+        # 6. Check for image tags in summary
+        if not image_url and hasattr(entry, "summary"):
+            img_match = re.search(r'<img[^>]+src="([^">]+)"', entry.summary)
+            if img_match:
+                image_url = img_match.group(1)
+
+        # 7. Check for image tags in content_encoded
+        if not image_url and hasattr(entry, "content_encoded"):
+            img_match = re.search(r'<img[^>]+src="([^">]+)"', entry.content_encoded)
+            if img_match:
+                image_url = img_match.group(1)
+
+        # 8. Check for image tags in content:encoded
+        if not image_url and hasattr(entry, "content_encoded"):
+            img_match = re.search(r'<img[^>]+src="([^">]+)"', entry.content_encoded)
+            if img_match:
+                image_url = img_match.group(1)
+
+        # 9. Check for image tags in itunes:image
+        if not image_url and hasattr(entry, "itunes_image"):
+            image_url = entry.itunes_image.get("href")
+
+        # 10. Check for image tags in media:thumbnail
+        if not image_url and hasattr(entry, "media_thumbnail"):
+            for thumbnail in entry.media_thumbnail:
+                if thumbnail.get("url"):
+                    image_url = thumbnail.get("url")
+                    break
+
+        # Set the image if we found one
+        if image_url:
+            # Clean up the image URL (remove any HTML entities)
+            image_url = html.unescape(image_url)
+            # Ensure the URL is absolute
+            if not image_url.startswith(('http://', 'https://')):
+                try:
+                    from urllib.parse import urljoin
+                    image_url = urljoin(entry.link, image_url)
+                except:
+                    pass
+            embed.set_image(url=image_url)
 
         # Add a "Read More" button that links to the article
         view = discord.ui.View()
@@ -1233,10 +1248,8 @@ class RSSFeed(commands.Cog):
     @check_feeds.before_loop
     async def before_check_feeds(self):
         await self.bot.wait_until_ready()
-        # Set the interval from settings
         interval = self.settings.get("check_interval", 15)
         self.check_feeds.change_interval(minutes=interval)
-        logger.info(f"RSS feed check interval set to {interval} minutes")
 
     @app_commands.command(
         name="rss",

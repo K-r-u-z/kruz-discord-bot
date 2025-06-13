@@ -444,6 +444,10 @@ class FreeGames(commands.Cog):
     async def webhook_check(self) -> None:
         """Check for new webhook data every minute"""
         try:
+            # Check if channel is set up first
+            if not self.settings.get("channel_id"):
+                return
+
             if not self.webhook_url:
                 logger.error("Webhook URL not configured")
                 return

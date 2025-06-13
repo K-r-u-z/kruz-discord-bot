@@ -217,8 +217,8 @@ class EarthquakeFeed(commands.Cog):
         self.feed_task = None
         self.embed_color = int(BOT_SETTINGS["embed_color"], 16)
         self.settings_file = "data/earthquake_settings.json"
-        # Significant earthquakes feed (M3.5+ globally) with 24-hour history
-        self.feed_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson"
+        # Significant earthquakes feed (M2.5+ globally) with 24-hour history
+        self.feed_url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
         
     async def cog_load(self):
         """Load settings and start the feed task when the cog is loaded"""
@@ -292,12 +292,15 @@ class EarthquakeFeed(commands.Cog):
         """Background task to check for new earthquakes"""
         await self.bot.wait_until_ready()
         
-        # Post only the most recent earthquake when the bot starts
-        await self.check_most_recent_earthquake()
+        # Only check for most recent earthquake if there are channels set up
+        if self.feed_channels:
+            await self.check_most_recent_earthquake()
         
         while not self.bot.is_closed():
             try:
-                await self.check_earthquakes()
+                # Only check for new earthquakes if there are channels set up
+                if self.feed_channels:
+                    await self.check_earthquakes()
                 # Check every 5 minutes
                 await asyncio.sleep(300)
             except asyncio.CancelledError:
@@ -319,7 +322,7 @@ class EarthquakeFeed(commands.Cog):
                             
                             # Check magnitude
                             magnitude = latest['properties']['mag']
-                            if magnitude < 3.5:
+                            if magnitude < 2.5:
                                 logger.info(f"Skipping earthquake with magnitude {magnitude}")
                                 return
                             
@@ -373,7 +376,7 @@ class EarthquakeFeed(commands.Cog):
                             
                             # Check magnitude
                             magnitude = latest['properties']['mag']
-                            if magnitude < 3.5:
+                            if magnitude < 2.5:
                                 return
                             
                             # Check if this is a new earthquake
@@ -473,7 +476,7 @@ class EarthquakeFeed(commands.Cog):
                 # Store channel configuration
                 self.feed_channels[guild_id] = {
                     'channel_id': int(channel),
-                    'last_quake_time': datetime.utcnow(),
+                    'last_quake_time': None,  # Initialize as None
                     'enabled': True,
                     'embed_color': 0xFF0000,
                     'mention_roles': []
@@ -481,6 +484,9 @@ class EarthquakeFeed(commands.Cog):
                 
                 # Save settings to file
                 await self.save_settings()
+                
+                # Check for the most recent earthquake after setting up the channel
+                await self.check_most_recent_earthquake()
                 
                 embed = discord.Embed(
                     title="✅ Earthquake Feed Setup",
