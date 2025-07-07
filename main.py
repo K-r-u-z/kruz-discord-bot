@@ -77,7 +77,7 @@ class RateLimitTracker:
             "  • Bucket-based tracking enabled"
         )
         
-    def _parse_reset_time(self, reset_after: Optional[float] = None, reset_time: Optional[float] = None) -> float:
+    def _parse_reset_time(self, reset_after: Optional[str] = None, reset_time: Optional[str] = None) -> float:
         """Calculate reset time from either reset-after or reset timestamp"""
         if reset_after is not None:
             return datetime.now().timestamp() + float(reset_after)
@@ -242,15 +242,15 @@ class RateLimitTracker:
                 )
             else:
                 # Update bucket information
-                self.update_bucket(headers, error.response.url.path)
-                endpoint_type = "Message Endpoint" if 'messages' in error.response.url.path.lower() else "General Endpoint"
+                self.update_bucket(dict(headers), str(error.response.url))
+                endpoint_type = "Message Endpoint" if 'messages' in str(error.response.url).lower() else "General Endpoint"
                 logger.warning(
                     f"Discord Rate Limit Hit ({endpoint_type}):\n"
                     f"  • Scope: {scope}\n"
                     f"  • Bucket: {bucket}\n"
                     f"  • Retry after: {retry_after:.2f}s\n"
                     f"  • Reset at: {reset_time}\n"
-                    f"  • Route: {error.response.url.path}"
+                    f"  • Route: {error.response.url}"
                 )
             
             # Use exponential backoff for retries
@@ -275,7 +275,8 @@ class RateLimitTracker:
                 f"  • Waiting: {wait_time:.2f}s\n"
                 f"  • Type: {'Message' if 'messages' in route.lower() else 'General'}"
             )
-            await asyncio.sleep(wait_time)
+            if wait_time is not None:
+                await asyncio.sleep(wait_time)
         return should_proceed
 
 class KruzBot(commands.Bot):
@@ -366,31 +367,37 @@ class KruzBot(commands.Bot):
             music_cog = self.get_cog('Music')
             if music_cog:
                 # Clean up all music players
-                for guild_id, player in music_cog.players.items():
+                players = getattr(music_cog, 'players', {})
+                for guild_id, player in players.items():
                     try:
-                        if player and player.connected:
+                        if player and hasattr(player, 'connected') and player.connected:
                             await player.disconnect()
                     except Exception as e:
                         logger.error(f"Error disconnecting music player in guild {guild_id}: {e}")
                 
                 # Clear all player views
-                for guild_id, view in music_cog.player_views.items():
+                player_views = getattr(music_cog, 'player_views', {})
+                for guild_id, view in player_views.items():
                     try:
-                        if view and view.message:
+                        if view and hasattr(view, 'message') and view.message:
                             await view.message.delete()
                     except discord.NotFound:
                         pass
                 
                 # Clear the dictionaries
-                music_cog.players.clear()
-                music_cog.player_views.clear()
+                if hasattr(music_cog, 'players'):
+                    getattr(music_cog, 'players', {}).clear()
+                if hasattr(music_cog, 'player_views'):
+                    getattr(music_cog, 'player_views', {}).clear()
             
             # Close any active sessions in cogs
             for cog in self.cogs.values():
-                if hasattr(cog, 'reddit') and cog.reddit is not None:
-                    await cog.reddit.close()
-                if hasattr(cog, 'session') and cog.session is not None:
-                    await cog.session.close()
+                reddit = getattr(cog, 'reddit', None)
+                if reddit is not None:
+                    await reddit.close()
+                session = getattr(cog, 'session', None)
+                if session is not None:
+                    await session.close()
             
             # Call parent close
             await super().close()
@@ -419,7 +426,7 @@ class KruzBot(commands.Bot):
                 if handled and self.rate_limit_retries < self.max_rate_limit_retries:
                     self.rate_limit_retries += 1
                     try:
-                        await asyncio.sleep(retry_after)
+                        await asyncio.sleep(float(retry_after))
                         # Retry the operation that failed
                         await self.close()
                         await self.start(TOKEN)

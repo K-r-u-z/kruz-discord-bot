@@ -187,12 +187,19 @@ class FreeGamesSettingsView(BaseSettingsView):
     @discord.ui.button(label="🔄 Toggle", style=discord.ButtonStyle.secondary)
     async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
         current_state = self.cog.settings.get("enabled", False)
-        self.cog.settings["enabled"] = not current_state
+        new_state = not current_state
+        self.cog.settings["enabled"] = new_state
         self.cog._save_settings()
         
-        logger.info(f"Free games announcements toggled to {'ENABLED' if not current_state else 'DISABLED'} by {interaction.user} ({interaction.user.id})")
+        # Clear warning flags when toggling
+        if hasattr(self.cog, '_webhook_url_warning_logged'):
+            delattr(self.cog, '_webhook_url_warning_logged')
+        if hasattr(self.cog, '_webhook_404_warning_logged'):
+            delattr(self.cog, '_webhook_404_warning_logged')
+        
+        logger.info(f"Free games announcements toggled to {'ENABLED' if new_state else 'DISABLED'} by {interaction.user} ({interaction.user.id})")
         await interaction.response.send_message(
-            f"Free games announcements {'enabled' if not current_state else 'disabled'}!",
+            f"Free games announcements {'enabled' if new_state else 'disabled'}!",
             ephemeral=True
         )
 
@@ -444,13 +451,25 @@ class FreeGames(commands.Cog):
     async def webhook_check(self) -> None:
         """Check for new webhook data every minute"""
         try:
-            # Check if channel is set up first
+            # Check if the cog is enabled first
+            if not self.settings.get("enabled", False):
+                return
+
+            # Check if channel is set up
             if not self.settings.get("channel_id"):
                 return
 
+            # Check if webhook URL is configured
             if not self.webhook_url:
-                logger.error("Webhook URL not configured")
+                # Only log this once to avoid spam
+                if not hasattr(self, '_webhook_url_warning_logged'):
+                    logger.warning("Webhook URL not configured - free games announcements disabled")
+                    self._webhook_url_warning_logged = True
                 return
+
+            # Clear the warning flag if webhook URL is now available
+            if hasattr(self, '_webhook_url_warning_logged'):
+                delattr(self, '_webhook_url_warning_logged')
 
             # Extract token from webhook URL
             token = self.webhook_url.split('/')[-1]
@@ -462,8 +481,19 @@ class FreeGames(commands.Cog):
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"https://webhook.site/token/{token}/requests?sorting=newest&page=1&per_page=10") as response:
                     if response.status != 200:
-                        logger.error(f"Failed to fetch webhook data: {response.status}")
-                        return
+                        # Only log 404 errors once to avoid spam
+                        if response.status == 404:
+                            if not hasattr(self, '_webhook_404_warning_logged'):
+                                logger.warning("Webhook endpoint not found (404) - check your webhook URL configuration")
+                                self._webhook_404_warning_logged = True
+                            return
+                        else:
+                            logger.error(f"Failed to fetch webhook data: {response.status}")
+                            return
+
+                    # Clear the 404 warning flag if request succeeds
+                    if hasattr(self, '_webhook_404_warning_logged'):
+                        delattr(self, '_webhook_404_warning_logged')
 
                     data = await response.json()
                     if not data or "data" not in data or not data["data"]:
@@ -937,10 +967,10 @@ class FreeGames(commands.Cog):
             self.settings = self._load_settings()
             self.cached_games = self.settings.get("cached_games", [])
             if not self.webhook_url:
-                logger.error("YOUR_WEBHOOK_URL not configured in environment variables")
+                logger.warning("YOUR_WEBHOOK_URL not configured in environment variables")
             if not self.webhook_secret:
-                logger.error("FREESTUFF_PUBLIC_KEY not configured in environment variables")
-            # Start webhook check task
+                logger.warning("FREESTUFF_PUBLIC_KEY not configured in environment variables")
+            # Start webhook check task (it will check if enabled internally)
             self.webhook_check.start()
         except Exception as e:
             logger.error(f"Error loading FreeGames cog: {e}")

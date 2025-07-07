@@ -54,7 +54,10 @@ def _get_default_settings() -> Dict[str, Any]:
             "status": "online",
             "activity": "watching over {server_name}"
         },
-        "embed_color": "0xbc69f0"
+        "embed_color": "0xbc69f0",
+        "moderation": {
+            "ban_log_channel_id": None
+        }
     }
 
 def _load_settings_file() -> Dict[str, Any]:

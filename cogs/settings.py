@@ -42,11 +42,30 @@ class BaseSettingsView(discord.ui.View):
                 value=f"#{self.cog.settings.get('embed_color', '2F3136')[2:]}",
                 inline=False
             )
+            embed.add_field(
+                name="Ban Log Channel",
+                value=self._get_ban_log_display(),
+                inline=False
+            )
             
             await interaction.response.edit_message(
                 embed=embed,
                 view=self.previous_view
             )
+
+    def _get_ban_log_display(self) -> str:
+        """Get the display text for ban log channel"""
+        moderation_settings = self.cog.settings.get("moderation", {})
+        ban_log_channel_id = moderation_settings.get("ban_log_channel_id")
+        
+        if ban_log_channel_id:
+            channel = self.cog.bot.get_channel(ban_log_channel_id)
+            if channel:
+                return f"<#{ban_log_channel_id}>"
+            else:
+                return f"Channel not found (ID: {ban_log_channel_id})"
+        else:
+            return "Not set"
 
 class SettingsView(BaseSettingsView):
     def __init__(self, cog: 'Settings'):
@@ -75,6 +94,18 @@ class SettingsView(BaseSettingsView):
             embed=discord.Embed(
                 title="Change Status",
                 description="Select a status:",
+                color=self.cog.embed_color
+            ),
+            view=view
+        )
+
+    @discord.ui.button(label="📋 Ban Log Channel", style=discord.ButtonStyle.primary)
+    async def ban_log_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = BanLogChannelView(self.cog, self)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Ban Log Channel Settings",
+                description="Configure the channel for ban/unban logs:",
                 color=self.cog.embed_color
             ),
             view=view
@@ -190,6 +221,147 @@ class ActivityModal(discord.ui.Modal, title="Change Bot Activity"):
             ephemeral=True
         )
 
+class BanLogChannelView(BaseSettingsView):
+    def __init__(self, cog: 'Settings', previous_view):
+        super().__init__(cog, previous_view)
+        self.add_ban_log_dropdown()
+
+    def add_ban_log_dropdown(self):
+        # Get current ban log channel
+        moderation_settings = self.cog.settings.get("moderation", {})
+        current_channel_id = moderation_settings.get("ban_log_channel_id")
+        
+        # Get guild and create dropdown for all text channels
+        guild = self.cog.bot.get_guild(GUILD_ID)
+        if guild and guild.me:
+            # Get all text channels where bot has permission to send messages
+            text_channels = [c for c in guild.text_channels if c.permissions_for(guild.me).send_messages]
+            
+            # Create options for dropdown
+            options = []
+            
+            # Add "Disable Ban Log" option
+            options.append(discord.SelectOption(
+                label="❌ Disable Ban Log",
+                description="Turn off ban logging",
+                value="disable",
+                emoji="❌"
+            ))
+            
+            # If current channel is set, add it first (even if it's not in the main list)
+            if current_channel_id:
+                current_channel = guild.get_channel(current_channel_id)
+                if current_channel and isinstance(current_channel, discord.TextChannel):
+                    options.append(discord.SelectOption(
+                        label=f"#{current_channel.name} (Current)",
+                        description=f"Currently selected - Channel ID: {current_channel.id}",
+                        value=str(current_channel.id),
+                        emoji="✅"
+                    ))
+            
+            # Calculate how many more channels we can add
+            max_additional_channels = 25 - len(options)  # Discord limit minus what we already have
+            
+            if max_additional_channels > 0:
+                # Prioritize channels that are likely to be used for logs
+                log_related_keywords = ['log', 'mod', 'admin', 'staff', 'ban', 'kick', 'warn', 'audit']
+                
+                # Sort channels by relevance (log-related first, then alphabetically)
+                def channel_sort_key(channel):
+                    if channel.id == current_channel_id:
+                        return -1  # Current channel should be first
+                    name_lower = channel.name.lower()
+                    # Check if channel name contains log-related keywords
+                    for keyword in log_related_keywords:
+                        if keyword in name_lower:
+                            return 0  # Log-related channels next
+                    return 1  # Other channels last
+                
+                sorted_channels = sorted(text_channels, key=channel_sort_key)
+                
+                # Add channels to options (respecting the limit)
+                added_channels = set()
+                
+                for channel in sorted_channels:
+                    if len(options) >= 25:  # Hard Discord limit
+                        break
+                    if channel.id != current_channel_id:  # Don't add current channel twice
+                        added_channels.add(channel.id)
+                        options.append(discord.SelectOption(
+                            label=f"#{channel.name}",
+                            description=f"Channel ID: {channel.id}",
+                            value=str(channel.id),
+                            emoji="📝"
+                        ))
+                
+                # If we have more channels than can fit, add a note (but only if we have room)
+                if len(text_channels) > len(added_channels) and len(options) < 25:
+                    options.append(discord.SelectOption(
+                        label="📋 More Channels Available",
+                        description=f"Showing {len(added_channels)} of {len(text_channels)} channels. Use /setbanlog for full list.",
+                        value="more_channels",
+                        emoji="📋"
+                    ))
+            
+            # Create the dropdown
+            dropdown = discord.ui.Select(
+                placeholder=f"Select a channel for ban logs... ({len(options)-1} channels available)",
+                options=options,
+                custom_id="banlog_dropdown"
+            )
+            dropdown.callback = self.dropdown_callback
+            self.add_item(dropdown)
+
+    async def dropdown_callback(self, interaction: discord.Interaction):
+        # Get the selected value from the dropdown
+        if not interaction.data or "values" not in interaction.data:
+            await interaction.response.send_message("❌ Error: No selection made", ephemeral=True)
+            return
+            
+        selected_value = interaction.data["values"][0]
+        
+        # Ensure moderation section exists
+        if "moderation" not in self.cog.settings:
+            self.cog.settings["moderation"] = {}
+        
+        if selected_value == "disable":
+            self.cog.settings["moderation"]["ban_log_channel_id"] = None
+            self.cog._save_settings()
+            
+            await interaction.response.send_message(
+                "✅ Ban log channel disabled",
+                ephemeral=True
+            )
+        elif selected_value == "more_channels":
+            # Show information about using the direct command
+            await interaction.response.send_message(
+                "📋 **Too many channels to display!**\n\n"
+                "You can use the `/setbanlog` command directly to set the ban log channel:\n"
+                "• `/setbanlog #channel-name` - Set to a specific channel\n"
+                "• `/setbanlog none` - Disable ban logging\n\n"
+                "Or try the dropdown again - it prioritizes log-related channels.",
+                ephemeral=True
+            )
+        else:
+            try:
+                channel_id = int(selected_value)
+                self.cog.settings["moderation"]["ban_log_channel_id"] = channel_id
+                self.cog._save_settings()
+                
+                channel = self.cog.bot.get_channel(channel_id)
+                if isinstance(channel, discord.TextChannel):
+                    await interaction.response.send_message(
+                        f"✅ Ban log channel set to: {channel.mention}",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f"✅ Ban log channel set to: <#{channel_id}>",
+                        ephemeral=True
+                    )
+            except ValueError:
+                await interaction.response.send_message("❌ Error: Invalid channel ID", ephemeral=True)
+
 class Settings(commands.Cog):
     """Cog for managing bot settings"""
     
@@ -280,6 +452,20 @@ class Settings(commands.Cog):
         await self.bot.wait_until_ready()
         await self._update_bot_presence()
 
+    def _get_ban_log_display(self) -> str:
+        """Get the display text for ban log channel"""
+        moderation_settings = self.settings.get("moderation", {})
+        ban_log_channel_id = moderation_settings.get("ban_log_channel_id")
+        
+        if ban_log_channel_id:
+            channel = self.bot.get_channel(ban_log_channel_id)
+            if channel:
+                return f"<#{ban_log_channel_id}>"
+            else:
+                return f"Channel not found (ID: {ban_log_channel_id})"
+        else:
+            return "Not set"
+
     @app_commands.command(
         name="settings",
         description="⚙️ Configure bot settings"
@@ -309,6 +495,11 @@ class Settings(commands.Cog):
         embed.add_field(
             name="Embed Color",
             value=f"#{self.settings.get('embed_color', '2F3136')[2:]}",
+            inline=False
+        )
+        embed.add_field(
+            name="Ban Log Channel",
+            value=self._get_ban_log_display(),
             inline=False
         )
         

@@ -224,44 +224,110 @@ class Moderation(commands.Cog):
                 ephemeral=True
             )
 
+    @purge_messages.error
+    async def purge_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors in the purge command"""
+        try:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the `Manage Messages` permission to use this command!",
+                    ephemeral=True
+                )
+            else:
+                logger.error(f"Unexpected error in purge command: {error}")
+                await interaction.response.send_message(
+                    "An unexpected error occurred.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error handling purge command error: {e}")
+
+    @cls_messages.error
+    async def cls_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors in the cls command"""
+        try:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the `Manage Messages` permission to use this command!",
+                    ephemeral=True
+                )
+            else:
+                logger.error(f"Unexpected error in cls command: {error}")
+                await interaction.response.send_message(
+                    "An unexpected error occurred.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error handling cls command error: {e}")
+
     @app_commands.command(
         name="ban",
         description="🔨 Ban a user from the server"
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(
-        user="👤 The user to ban",
+        user="👤 The user to ban (ID, mention, or username)",
         reason="📝 Reason for the ban"
     )
     @app_commands.checks.has_permissions(ban_members=True)
     async def ban_user(
         self,
         interaction: discord.Interaction,
-        user: discord.Member,
+        user: str,
         reason: Optional[str] = None
     ) -> None:
         """Ban a user from the server"""
         try:
+            # Resolve the user from the string input
+            user_to_ban = await self._resolve_user(interaction, user)
+            
+            if not user_to_ban:
+                await interaction.response.send_message(
+                    f"Could not find user: {user}\nPlease use a user ID, mention, or username.",
+                    ephemeral=True
+                )
+                return
+
             # Don't allow banning bots or self
-            if user.bot:
+            if user_to_ban.bot:
                 await interaction.response.send_message(
                     "Cannot ban bots!",
                     ephemeral=True
                 )
                 return
                 
-            if user == interaction.user:
+            if user_to_ban == interaction.user:
                 await interaction.response.send_message(
                     "You cannot ban yourself!",
                     ephemeral=True
                 )
                 return
 
+            # Check if user is already banned
+            try:
+                await interaction.guild.fetch_ban(user_to_ban)
+                await interaction.response.send_message(
+                    f"{user_to_ban.mention} is already banned!",
+                    ephemeral=True
+                )
+                return
+            except discord.NotFound:
+                # User is not banned, proceed
+                pass
+
             # Create ban embed
             ban_embed = discord.Embed(
                 title="🔨 You have been banned!",
                 description=(
-                    f"**User:** {user.mention}\n"
+                    f"**User:** {user_to_ban.mention}\n"
                     f"**Banned By:** {interaction.user.mention}\n"
                     f"**Reason:** {reason if reason else 'No reason provided'}"
                 ),
@@ -269,31 +335,68 @@ class Moderation(commands.Cog):
                 timestamp=interaction.created_at
             )
             
-            # Try to DM the user
-            try:
-                await user.send(embed=ban_embed)
-                dm_status = "Ban notification sent via DM"
-            except discord.Forbidden:
-                dm_status = "Could not DM user (DMs disabled)"
-            except Exception as e:
-                logger.error(f"Error sending ban DM: {e}")
-                dm_status = "Error sending DM"
+            # Try to DM the user (only if they're a member)
+            dm_status = "Could not DM user (not a member or DMs disabled)"
+            if isinstance(user_to_ban, discord.Member):
+                try:
+                    await user_to_ban.send(embed=ban_embed)
+                    dm_status = "Ban notification sent via DM"
+                except discord.Forbidden:
+                    dm_status = "Could not DM user (DMs disabled)"
+                except Exception as e:
+                    logger.error(f"Error sending ban DM: {e}")
+                    dm_status = "Error sending DM"
 
             # Ban the user
-            await user.ban(reason=reason or f"Banned by {interaction.user}")
+            await interaction.guild.ban(user_to_ban, reason=reason or f"Banned by {interaction.user}")
+            
+            # Create confirmation embed
+            confirm_embed = discord.Embed(
+                title="🔨 User Banned",
+                description=(
+                    f"**User:** {user_to_ban.mention}\n"
+                    f"**Banned By:** {interaction.user.mention}\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}\n"
+                    f"**DM Status:** {dm_status}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
             
             # Send confirmation
             await interaction.response.send_message(
-                embed=ban_embed,
+                embed=confirm_embed,
                 ephemeral=True
             )
             
+            # Send ban log to configured channel
+            log_embed = discord.Embed(
+                title="🔨 User Banned",
+                description=(
+                    f"**User:** {user_to_ban.mention} (`{user_to_ban.id}`)\n"
+                    f"**Banned By:** {interaction.user.mention} (`{interaction.user.id}`)\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}\n"
+                    f"**DM Status:** {dm_status}\n"
+                    f"**Channel:** {interaction.channel.mention}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
+            log_embed.set_footer(text=f"User ID: {user_to_ban.id}")
+            
+            await self._send_ban_log(log_embed, "ban")
+            
             # Log the ban
-            logger.info(f"{interaction.user} banned {user} for reason: {reason}")
+            logger.info(f"{interaction.user} banned {user_to_ban} for reason: {reason}")
 
         except discord.Forbidden:
             await interaction.response.send_message(
                 "I don't have permission to ban users!",
+                ephemeral=True
+            )
+        except discord.NotFound:
+            await interaction.response.send_message(
+                "User not found or not accessible.",
                 ephemeral=True
             )
         except Exception as e:
@@ -303,13 +406,40 @@ class Moderation(commands.Cog):
                 ephemeral=True
             )
 
+    @ban_user.error
+    async def ban_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors in the ban command"""
+        try:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the `Ban Members` permission to use this command!",
+                    ephemeral=True
+                )
+            elif isinstance(error, app_commands.TransformerError):
+                await interaction.response.send_message(
+                    "Invalid user format. Please use a user ID, mention, or username.",
+                    ephemeral=True
+                )
+            else:
+                logger.error(f"Unexpected error in ban command: {error}")
+                await interaction.response.send_message(
+                    "An unexpected error occurred.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error handling ban command error: {e}")
+
     @app_commands.command(
         name="tempban",
         description="⏳ Temporarily ban a user from the server"
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(
-        user="👤 The user to tempban",
+        user="👤 The user to tempban (ID, mention, or username)",
         duration="⏱️ Duration (e.g. 1d, 2h, 30m)",
         reason="📝 Reason for the tempban"
     )
@@ -317,26 +447,48 @@ class Moderation(commands.Cog):
     async def tempban_user(
         self,
         interaction: discord.Interaction,
-        user: discord.Member,
+        user: str,
         duration: str,
         reason: Optional[str] = None
     ) -> None:
         """Temporarily ban a user from the server"""
         try:
+            # Resolve the user from the string input
+            user_to_ban = await self._resolve_user(interaction, user)
+            
+            if not user_to_ban:
+                await interaction.response.send_message(
+                    f"Could not find user: {user}\nPlease use a user ID, mention, or username.",
+                    ephemeral=True
+                )
+                return
+
             # Don't allow tempbanning bots or self
-            if user.bot:
+            if user_to_ban.bot:
                 await interaction.response.send_message(
                     "Cannot tempban bots!",
                     ephemeral=True
                 )
                 return
                 
-            if user == interaction.user:
+            if user_to_ban == interaction.user:
                 await interaction.response.send_message(
                     "You cannot tempban yourself!",
                     ephemeral=True
                 )
                 return
+
+            # Check if user is already banned
+            try:
+                await interaction.guild.fetch_ban(user_to_ban)
+                await interaction.response.send_message(
+                    f"{user_to_ban.mention} is already banned!",
+                    ephemeral=True
+                )
+                return
+            except discord.NotFound:
+                # User is not banned, proceed
+                pass
 
             # Parse duration
             try:
@@ -357,7 +509,7 @@ class Moderation(commands.Cog):
             tempban_embed = discord.Embed(
                 title="⏳ User Tempbanned",
                 description=(
-                    f"**User:** {user.mention}\n"
+                    f"**User:** {user_to_ban.mention}\n"
                     f"**Banned By:** {interaction.user.mention}\n"
                     f"**Duration:** {duration}\n"
                     f"**Unban Time:** <t:{int(unban_time.timestamp())}:R>\n"
@@ -367,34 +519,75 @@ class Moderation(commands.Cog):
                 timestamp=interaction.created_at
             )
             
-            # Try to DM the user
-            try:
-                await user.send(embed=tempban_embed)
-                dm_status = "Tempban notification sent via DM"
-            except discord.Forbidden:
-                dm_status = "Could not DM user (DMs disabled)"
-            except Exception as e:
-                logger.error(f"Error sending tempban DM: {e}")
-                dm_status = "Error sending DM"
+            # Try to DM the user (only if they're a member)
+            dm_status = "Could not DM user (not a member or DMs disabled)"
+            if isinstance(user_to_ban, discord.Member):
+                try:
+                    await user_to_ban.send(embed=tempban_embed)
+                    dm_status = "Tempban notification sent via DM"
+                except discord.Forbidden:
+                    dm_status = "Could not DM user (DMs disabled)"
+                except Exception as e:
+                    logger.error(f"Error sending tempban DM: {e}")
+                    dm_status = "Error sending DM"
 
             # Ban the user
-            await user.ban(reason=f"Tempbanned by {interaction.user} for {duration}. Reason: {reason or 'No reason provided'}")
+            await interaction.guild.ban(user_to_ban, reason=f"Tempbanned by {interaction.user} for {duration}. Reason: {reason or 'No reason provided'}")
             
             # Schedule unban
-            self.bot.loop.create_task(self._schedule_unban(user.id, unban_time))
+            self.bot.loop.create_task(self._schedule_unban(user_to_ban.id, unban_time))
+            
+            # Create confirmation embed
+            confirm_embed = discord.Embed(
+                title="⏳ User Tempbanned",
+                description=(
+                    f"**User:** {user_to_ban.mention}\n"
+                    f"**Banned By:** {interaction.user.mention}\n"
+                    f"**Duration:** {duration}\n"
+                    f"**Unban Time:** <t:{int(unban_time.timestamp())}:R>\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}\n"
+                    f"**DM Status:** {dm_status}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
             
             # Send confirmation
             await interaction.response.send_message(
-                embed=tempban_embed,
+                embed=confirm_embed,
                 ephemeral=True
             )
             
+            # Send tempban log to configured channel
+            log_embed = discord.Embed(
+                title="⏳ User Tempbanned",
+                description=(
+                    f"**User:** {user_to_ban.mention} (`{user_to_ban.id}`)\n"
+                    f"**Banned By:** {interaction.user.mention} (`{interaction.user.id}`)\n"
+                    f"**Duration:** {duration}\n"
+                    f"**Unban Time:** <t:{int(unban_time.timestamp())}:R>\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}\n"
+                    f"**DM Status:** {dm_status}\n"
+                    f"**Channel:** {interaction.channel.mention}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
+            log_embed.set_footer(text=f"User ID: {user_to_ban.id} | Unban Time: {unban_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            
+            await self._send_ban_log(log_embed, "tempban")
+            
             # Log the tempban
-            logger.info(f"{interaction.user} tempbanned {user} for {duration}. Reason: {reason}")
+            logger.info(f"{interaction.user} tempbanned {user_to_ban} for {duration}. Reason: {reason}")
 
         except discord.Forbidden:
             await interaction.response.send_message(
                 "I don't have permission to ban users!",
+                ephemeral=True
+            )
+        except discord.NotFound:
+            await interaction.response.send_message(
+                "User not found or not accessible.",
                 ephemeral=True
             )
         except Exception as e:
@@ -403,6 +596,33 @@ class Moderation(commands.Cog):
                 "An error occurred while processing the tempban.",
                 ephemeral=True
             )
+
+    @tempban_user.error
+    async def tempban_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors in the tempban command"""
+        try:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the `Ban Members` permission to use this command!",
+                    ephemeral=True
+                )
+            elif isinstance(error, app_commands.TransformerError):
+                await interaction.response.send_message(
+                    "Invalid user format. Please use a user ID, mention, or username.",
+                    ephemeral=True
+                )
+            else:
+                logger.error(f"Unexpected error in tempban command: {error}")
+                await interaction.response.send_message(
+                    "An unexpected error occurred.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error handling tempban command error: {e}")
 
     @app_commands.command(
         name="unban",
@@ -469,6 +689,22 @@ class Moderation(commands.Cog):
                 ephemeral=True
             )
             
+            # Send unban log to configured channel
+            log_embed = discord.Embed(
+                title="🔓 User Unbanned",
+                description=(
+                    f"**User:** {user_to_unban.user.mention} (`{user_to_unban.user.id}`)\n"
+                    f"**Unbanned By:** {interaction.user.mention} (`{interaction.user.id}`)\n"
+                    f"**Reason:** {reason if reason else 'No reason provided'}\n"
+                    f"**Channel:** {interaction.channel.mention}"
+                ),
+                color=self.embed_color,
+                timestamp=interaction.created_at
+            )
+            log_embed.set_footer(text=f"User ID: {user_to_unban.user.id}")
+            
+            await self._send_ban_log(log_embed, "unban")
+            
             # Log the unban
             logger.info(f"{interaction.user} unbanned {user_to_unban.user} for reason: {reason}")
 
@@ -483,6 +719,158 @@ class Moderation(commands.Cog):
                 "An error occurred while processing the unban.",
                 ephemeral=True
             )
+
+    @unban_user.error
+    async def unban_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors in the unban command"""
+        try:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the `Ban Members` permission to use this command!",
+                    ephemeral=True
+                )
+            else:
+                logger.error(f"Unexpected error in unban command: {error}")
+                await interaction.response.send_message(
+                    "An unexpected error occurred.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error handling unban command error: {e}")
+
+    @app_commands.command(
+        name="setbanlog",
+        description="🔧 Set the ban log channel for moderation actions"
+    )
+    @app_commands.guilds(GUILD_ID)
+    @app_commands.describe(
+        channel="📝 The channel to send ban logs to (use 'none' to disable)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_ban_log_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: Optional[discord.TextChannel] = None
+    ) -> None:
+        """Set the ban log channel for moderation actions"""
+        try:
+            import json
+            import os
+            
+            # Load current settings
+            settings_file = 'data/bot_settings.json'
+            with open(settings_file, 'r') as f:
+                settings = json.load(f)
+            
+            # Update the ban log channel
+            if channel:
+                settings.setdefault("moderation", {})["ban_log_channel_id"] = channel.id
+                message = f"✅ Ban log channel set to {channel.mention}"
+                logger.info(f"Ban log channel set to {channel.name} ({channel.id}) by {interaction.user}")
+            else:
+                settings.setdefault("moderation", {})["ban_log_channel_id"] = None
+                message = "✅ Ban log channel disabled"
+                logger.info(f"Ban log channel disabled by {interaction.user}")
+            
+            # Save settings
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=4)
+            
+            # Reload settings in config
+            from config import load_bot_settings
+            import config
+            config.BOT_SETTINGS = load_bot_settings()
+            
+            await interaction.response.send_message(message, ephemeral=True)
+            
+        except Exception as e:
+            logger.error(f"Error setting ban log channel: {e}")
+            await interaction.response.send_message(
+                "❌ An error occurred while setting the ban log channel.",
+                ephemeral=True
+            )
+
+    @set_ban_log_channel.error
+    async def set_ban_log_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors in the set ban log channel command"""
+        try:
+            if isinstance(error, app_commands.MissingPermissions):
+                await interaction.response.send_message(
+                    "You need the `Administrator` permission to use this command!",
+                    ephemeral=True
+                )
+            else:
+                logger.error(f"Unexpected error in set ban log command: {error}")
+                await interaction.response.send_message(
+                    "An unexpected error occurred.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error handling set ban log command error: {e}")
+
+    async def _resolve_user(self, interaction: discord.Interaction, user_input: str) -> Optional[discord.User]:
+        """Resolve a user from string input (ID, mention, or username)"""
+        try:
+            # Handle mentions: <@123456789> or <@!123456789>
+            if user_input.startswith('<@') and user_input.endswith('>'):
+                user_id = int(user_input[2:-1].replace('!', ''))
+                return await self.bot.fetch_user(user_id)
+            
+            # Try to parse as user ID
+            try:
+                user_id = int(user_input)
+                return await self.bot.fetch_user(user_id)
+            except ValueError:
+                pass
+            
+            # Try to parse as username
+            username = user_input.strip('@')
+            # Try to find by username in guild members
+            member = discord.utils.get(interaction.guild.members, name=username)
+            if member:
+                return member
+            
+            # If not found in members, try to find by display name
+            member = discord.utils.get(interaction.guild.members, display_name=username)
+            if member:
+                return member
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error resolving user {user_input}: {e}")
+            return None
+
+    async def _send_ban_log(self, embed: discord.Embed, action_type: str) -> None:
+        """Send ban log to the configured channel"""
+        try:
+            # Get ban log channel ID from settings
+            ban_log_channel_id = BOT_SETTINGS.get("moderation", {}).get("ban_log_channel_id")
+            
+            if not ban_log_channel_id:
+                logger.info("No ban log channel configured, skipping log message")
+                return
+            
+            # Get the channel
+            channel = self.bot.get_channel(ban_log_channel_id)
+            if not channel:
+                logger.warning(f"Ban log channel {ban_log_channel_id} not found")
+                return
+            
+            # Send the log message
+            await channel.send(embed=embed)
+            logger.info(f"Sent {action_type} log to channel {channel.name}")
+            
+        except Exception as e:
+            logger.error(f"Error sending ban log: {e}")
 
     def _parse_duration(self, duration: str) -> int:
         """Parse duration string into seconds"""
@@ -511,6 +899,22 @@ class Moderation(commands.Cog):
             # Unban the user
             user = await self.bot.fetch_user(user_id)
             await guild.unban(user, reason="Temporary ban expired")
+            
+            # Send automatic unban log to configured channel
+            log_embed = discord.Embed(
+                title="🔓 User Auto-Unbanned",
+                description=(
+                    f"**User:** {user.mention} (`{user.id}`)\n"
+                    f"**Action:** Automatic unban after tempban expired\n"
+                    f"**Original Tempban End:** <t:{int(unban_time.timestamp())}:F>\n"
+                    f"**Unbanned At:** <t:{int(datetime.datetime.now().timestamp())}:F>"
+                ),
+                color=self.embed_color,
+                timestamp=datetime.datetime.now()
+            )
+            log_embed.set_footer(text=f"User ID: {user.id} | Auto-unban")
+            
+            await self._send_ban_log(log_embed, "auto-unban")
             
             logger.info(f"Automatically unbanned {user} after tempban expired")
             
